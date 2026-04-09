@@ -11,7 +11,7 @@ services:
       - key: APP_URL
         value: https://djambo-app.com
       - key: API_URL
-        value: https://fleetcommand-api.onrender.com
+        value: https://api.djambo-app.com
       - key: ALLOWED_ORIGINS
         value: https://djambo-app.com,https://www.djambo-app.com
       - key: RESEND_FROM_EMAIL
@@ -37,4 +37,4 @@ services:
         destination: /index.html
     envVars:
       - key: VITE_API_BASE_URL
-        value: https://fleetcommand-api.onrender.com
+        value: https://api.djambo-app.com
