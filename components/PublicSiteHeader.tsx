@@ -56,8 +56,8 @@ export const PublicSiteHeader: React.FC<PublicSiteHeaderProps> = ({
 
   return (
     <nav className={'fixed inset-x-0 top-0 z-50 border-b ' + navClass}>
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-16 flex items-center justify-between gap-4">
-        <Link to="/" className="min-w-0">
+      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 min-h-16 py-3 lg:py-0 flex items-center justify-between gap-3">
+        <Link to="/" className="min-w-0 flex-1 lg:flex-none">
           <BrandLogo theme={isDark ? 'light' : 'dark'} size="sm" subtitle={subtitle} />
         </Link>
 
@@ -115,7 +115,7 @@ export const PublicSiteHeader: React.FC<PublicSiteHeaderProps> = ({
           )}
         </div>
 
-        <button className={'lg:hidden p-2 rounded-xl border ' + menuButtonClass} onClick={onToggleMobileMenu}>
+        <button className={'lg:hidden shrink-0 p-2 rounded-xl border ' + menuButtonClass} onClick={onToggleMobileMenu}>
           {mobileMenuOpen ? <X size={20} /> : <Menu size={20} />}
         </button>
       </div>

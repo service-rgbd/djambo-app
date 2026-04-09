@@ -29,25 +29,25 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen flex bg-[#f7f5f0] font-sans">
-      <div className="flex-1 flex flex-col justify-center py-8 px-4 sm:px-6 lg:flex-none lg:w-[42%] lg:px-14 xl:px-20 bg-[radial-gradient(circle_at_top,#ffffff_0%,#f8f5ef_52%,#f2eee7_100%)] z-10 relative overflow-hidden">
+    <div className="min-h-screen lg:flex bg-[#f7f5f0] font-sans">
+      <div className="flex-1 flex flex-col py-6 px-4 sm:px-6 lg:flex-none lg:w-[42%] lg:px-14 xl:px-20 bg-[radial-gradient(circle_at_top,#ffffff_0%,#f8f5ef_52%,#f2eee7_100%)] z-10 relative overflow-hidden">
         <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(15,23,42,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.04) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
-        <Link to="/" className="absolute top-6 left-6 flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors text-sm font-medium z-10">
+        <Link to="/" className="relative z-10 inline-flex w-fit items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors text-sm font-medium mb-6 lg:mt-2">
             <ChevronLeft size={16} />
             Retour
         </Link>
 
-        <div className="mx-auto w-full max-w-sm lg:w-full lg:max-w-[430px] relative z-10">
-          <div className="mb-4">
+        <div className="mx-auto my-auto w-full max-w-sm lg:w-full lg:max-w-[430px] relative z-10">
+          <div className="mb-4 sm:mb-5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-indigo-600 mb-2">FleetCommand Plus</p>
-            <h1 className="text-3xl lg:text-[2rem] font-extrabold text-slate-900 tracking-tight">Connexion plus compacte et immediate.</h1>
-            <p className="mt-2 text-sm text-slate-600 leading-relaxed">On garde le ton premium, mais avec moins de hauteur et un acces plus direct au compte.</p>
+            <h1 className="text-2xl sm:text-3xl lg:text-[2rem] font-extrabold text-slate-900 tracking-tight">Connexion simple et directe.</h1>
+            <p className="mt-2 text-sm text-slate-600 leading-relaxed">Un acces rapide au compte, sans blocs qui s’empilent inutilement.</p>
           </div>
 
-          <div className="mt-5 bg-white/92 backdrop-blur-xl py-6 px-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] rounded-[28px] sm:px-7 border border-white/80">
+          <div className="mt-4 bg-white/92 backdrop-blur-xl py-5 px-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] rounded-[24px] sm:rounded-[28px] sm:px-7 border border-white/80">
             
-            <div className="text-center mb-6">
-                <div className="flex items-center justify-center mb-4">
+            <div className="text-center mb-5">
+                <div className="flex items-center justify-center mb-3">
                   <BrandLogo size="sm" subtitle="L'app FleetCommand" />
                 </div>
                 <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">
@@ -58,9 +58,9 @@ export const LoginPage: React.FC = () => {
                 </p>
             </div>
 
-             <button
+               <button
                   type="button"
-                  className="w-full inline-flex justify-center items-center py-3 px-4 border border-slate-200 rounded-2xl shadow-sm bg-[#fbfaf7] text-sm font-semibold text-slate-700 hover:bg-white hover:border-slate-300 transition-all duration-200"
+                 className="w-full inline-flex justify-center items-center py-3 px-4 border border-slate-200 rounded-2xl shadow-sm bg-[#fbfaf7] text-sm font-semibold text-slate-700 hover:bg-white hover:border-slate-300 transition-all duration-200"
                 >
                   <svg className="h-5 w-5 mr-3" aria-hidden="true" viewBox="0 0 24 24">
                     <path
@@ -96,8 +96,8 @@ export const LoginPage: React.FC = () => {
                 </div>
             </div>
 
-            <div className="mt-6">
-              <form className="space-y-4" onSubmit={handleSubmit}>
+            <div className="mt-5">
+              <form className="space-y-3.5" onSubmit={handleSubmit}>
                 {error && (
                     <div className="bg-rose-50 border border-rose-100 text-rose-600 text-sm p-3 rounded-xl flex items-start gap-3 animate-fade-in">
                         <div className="p-0.5 mt-0.5"><div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div></div>
@@ -208,7 +208,7 @@ export const LoginPage: React.FC = () => {
           </div>
         </div>
         
-        <div className="absolute bottom-6 left-0 w-full text-center lg:text-left lg:pl-24 text-slate-400 text-xs">
+        <div className="relative z-10 mt-6 text-center lg:text-left lg:pl-0 text-slate-400 text-xs">
             © 2024 FleetCommand
         </div>
       </div>

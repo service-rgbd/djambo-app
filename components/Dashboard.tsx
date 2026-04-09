@@ -30,11 +30,11 @@ const StatCard: React.FC<{
   };
 
   return (
-    <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
-      <div className="flex justify-between items-start">
+    <div className="bg-white p-5 sm:p-6 rounded-xl border border-slate-200 shadow-sm hover:shadow-md transition-shadow">
+      <div className="flex justify-between items-start gap-4">
         <div>
           <p className="text-sm font-medium text-slate-500 mb-1">{title}</p>
-          <h3 className="text-2xl font-bold text-slate-900">{value}</h3>
+          <h3 className="text-xl sm:text-2xl font-bold text-slate-900 break-words">{value}</h3>
           {trend && (
             <p className="text-xs font-medium text-green-600 mt-2 flex items-center gap-1">
               <TrendingUp size={12} />
@@ -136,7 +136,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
       )}
 
       {/* Stats Grid */}
-      <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6">
+      <div className="grid grid-cols-1 sm:grid-cols-2 xl:grid-cols-4 gap-4 sm:gap-6">
         <StatCard 
           title="Total Véhicules" 
           value={dashboardStats.totalVehicles} 
@@ -166,9 +166,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
         />
       </div>
 
-      <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
+        <div className="grid grid-cols-1 xl:grid-cols-3 gap-4 sm:gap-6">
           {/* Public Store Link Banner - Replaces GPS Banner for now or adds to it */}
-          <div className="lg:col-span-2 relative overflow-hidden rounded-xl bg-slate-900 p-8 shadow-lg text-white group">
+          <div className="xl:col-span-2 relative overflow-hidden rounded-xl bg-slate-900 p-5 sm:p-8 shadow-lg text-white group">
             <div className="absolute top-0 right-0 w-64 h-64 bg-indigo-500/20 rounded-full blur-3xl pointer-events-none group-hover:bg-indigo-500/30 transition-all duration-500"></div>
             
             <div className="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
@@ -177,19 +177,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
                   <Share2 size={14} />
                   <span>Nouveau : Boutique en ligne</span>
                 </div>
-                <h2 className="text-2xl font-bold leading-tight">
+                <h2 className="text-xl sm:text-2xl font-bold leading-tight">
                   Votre site de réservation est prêt !
                 </h2>
                 <p className="text-slate-400 text-sm">
                   Partagez ce lien unique avec vos clients. Ils pourront consulter vos véhicules disponibles et faire une demande de réservation directement en ligne.
                 </p>
-                <div className="flex items-center gap-2 pt-2">
-                    <div className="bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-400 font-mono truncate max-w-[250px] md:max-w-xs select-all">
+                <div className="flex flex-col sm:flex-row sm:items-center gap-2 pt-2">
+                  <div className="w-full bg-slate-800 border border-slate-700 rounded-lg px-3 py-2 text-xs text-slate-400 font-mono break-all sm:truncate sm:max-w-xs select-all">
                         {storeUrl}
                     </div>
                     <button 
                         onClick={handleCopyLink}
-                        className="p-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white transition-colors"
+                    className="inline-flex items-center justify-center p-2 bg-indigo-600 hover:bg-indigo-700 rounded-lg text-white transition-colors self-start sm:self-auto"
                         title="Copier le lien"
                     >
                         {copied ? <Check size={16} /> : <Copy size={16} />}
@@ -197,7 +197,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
                 </div>
               </div>
               
-              <div className="hidden md:block">
+              <div className="hidden md:block shrink-0">
                   <div className="w-32 h-32 bg-slate-800 rounded-xl border border-slate-700 flex flex-col items-center justify-center text-center p-2 shadow-2xl rotate-3 group-hover:rotate-0 transition-transform duration-500">
                      <Car className="text-indigo-500 mb-2" size={32} />
                      <span className="text-[10px] text-slate-500 uppercase font-bold">{agencySlug}</span>
@@ -208,7 +208,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
           </div>
 
           {/* Alert Card */}
-          <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
+          <div className="bg-white p-5 sm:p-6 rounded-xl border border-slate-200 shadow-sm flex flex-col">
             <h3 className="text-lg font-bold text-slate-800 mb-4">Visibilite operationnelle</h3>
             <div className="flex-1 space-y-4">
               <div className="flex gap-3 items-start p-3 bg-emerald-50 rounded-lg border border-emerald-100">
@@ -236,17 +236,17 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
           </div>
       </div>
 
-      <div className="bg-white p-6 rounded-xl border border-slate-200 shadow-sm">
-          <div className="flex justify-between items-center mb-6">
+      <div className="bg-white p-5 sm:p-6 rounded-xl border border-slate-200 shadow-sm">
+          <div className="flex flex-col gap-3 sm:flex-row sm:justify-between sm:items-center mb-6">
             <h3 className="text-lg font-bold text-slate-800">Analyse des Revenus</h3>
-            <select className="text-sm border border-slate-200 rounded-lg px-3 py-1 text-slate-600 outline-none focus:border-indigo-500">
+            <select className="w-full sm:w-auto text-sm border border-slate-200 rounded-lg px-3 py-2 text-slate-600 outline-none focus:border-indigo-500 bg-white">
               <option>6 Derniers Mois</option>
               <option>Cette Année</option>
             </select>
           </div>
-          <div className="h-80 w-full">
+          <div className="h-64 sm:h-80 w-full">
             <ResponsiveContainer width="100%" height="100%">
-              <AreaChart data={dashboardRevenueData} margin={{ top: 10, right: 30, left: 0, bottom: 0 }}>
+              <AreaChart data={dashboardRevenueData} margin={{ top: 10, right: 12, left: -18, bottom: 0 }}>
                 <defs>
                   <linearGradient id="colorRevenue" x1="0" y1="0" x2="0" y2="1">
                     <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.1}/>

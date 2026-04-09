@@ -171,9 +171,9 @@ export const LandingPage: React.FC = () => {
           <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.7) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.7) 1px, transparent 1px)', backgroundSize: '72px 72px' }} />
         </div>
 
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-16">
-          <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-10 items-end min-h-[760px] pt-8">
-            <div className="max-w-2xl pt-10 lg:pt-20">
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-14 sm:pb-16">
+          <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-8 lg:gap-10 items-end min-h-[680px] lg:min-h-[760px] pt-6 sm:pt-8">
+            <div className="max-w-2xl pt-6 sm:pt-10 lg:pt-20">
               <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200 mb-6">
                 <Sparkles size={12} className="text-amber-300" />
                 Conduisez une nouvelle experience
@@ -181,7 +181,7 @@ export const LandingPage: React.FC = () => {
 
               <p className="text-sm text-slate-300 mb-4">La flotte la plus selective avec les tarifs les plus complets.</p>
 
-              <h1 className="text-4xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight leading-[0.95] mb-6">
+              <h1 className="text-3xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight leading-[0.95] mb-5 sm:mb-6">
                 <span className="text-white">100%</span>{' '}
                 <span className="text-amber-300">marques premium</span>
                 <br />
@@ -189,11 +189,11 @@ export const LandingPage: React.FC = () => {
                 <span className="text-indigo-300">modeles garantis</span>
               </h1>
 
-              <p className="text-base sm:text-lg text-slate-300 max-w-xl leading-relaxed mb-8">
+              <p className="text-sm sm:text-lg text-slate-300 max-w-xl leading-relaxed mb-6 sm:mb-8">
                 Une presentation editorialisee pour les voyageurs et dirigeants qui veulent davantage qu'une simple location: plus de transparence, plus de service, plus de desirabilite.
               </p>
 
-              <div className="flex flex-wrap gap-3 mb-8">
+              <div className="flex flex-wrap gap-2.5 sm:gap-3 mb-6 sm:mb-8">
                 {['Dakar', 'Abidjan', 'Bamako', 'Plateau', 'Almadies'].map((label) => (
                   <span key={label} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200">
                     {label}
@@ -216,12 +216,12 @@ export const LandingPage: React.FC = () => {
             </div>
 
             <div className="relative lg:pb-8">
-              <form onSubmit={handleSearch} className="rounded-[28px] border border-white/10 bg-white text-slate-900 shadow-[0_32px_120px_rgba(2,6,23,0.45)] overflow-hidden">
-                <div className="border-b border-slate-200 px-6 py-5">
+              <form onSubmit={handleSearch} className="rounded-[24px] sm:rounded-[28px] border border-white/10 bg-white text-slate-900 shadow-[0_32px_120px_rgba(2,6,23,0.45)] overflow-hidden">
+                <div className="border-b border-slate-200 px-4 sm:px-6 py-4 sm:py-5">
                   <div className="flex items-center justify-between gap-4 flex-wrap">
                     <div>
                       <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Recherche premium</p>
-                      <h2 className="text-2xl font-extrabold text-slate-900 mt-1">Reservez en un seul module</h2>
+                      <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1">Reservez en un seul module</h2>
                     </div>
                     <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
                       <BadgeCheck size={12} className="text-emerald-600" />
@@ -230,8 +230,8 @@ export const LandingPage: React.FC = () => {
                   </div>
                 </div>
 
-                <div className="p-6 grid sm:grid-cols-2 gap-4">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                <div className="p-4 sm:p-6 grid sm:grid-cols-2 gap-3 sm:gap-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4">
                     <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Store depart</label>
                     <div className="mt-2 flex items-center gap-2 text-slate-800">
                       <MapPin size={16} className="text-indigo-600" />
@@ -243,7 +243,7 @@ export const LandingPage: React.FC = () => {
                     </div>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4">
                     <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Store retour</label>
                     <div className="mt-2 flex items-center gap-2 text-slate-800">
                       <Building2 size={16} className="text-indigo-600" />
@@ -254,7 +254,7 @@ export const LandingPage: React.FC = () => {
                     </button>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
+                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4">
                     <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Depart</label>
                     <div className="mt-2 grid grid-cols-2 gap-2">
                       <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 border border-slate-200">

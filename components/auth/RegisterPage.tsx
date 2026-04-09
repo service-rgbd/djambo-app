@@ -101,22 +101,22 @@ export const RegisterPage: React.FC = () => {
   const isFormValid = baseFieldsAreValid && roleFieldsAreValid;
 
   return (
-    <div className="min-h-screen flex bg-[#f7f5f0] font-sans">
-      <div className="flex-1 flex flex-col justify-center py-8 px-4 sm:px-6 lg:flex-none lg:w-[43%] lg:px-14 xl:px-20 bg-[radial-gradient(circle_at_top,#ffffff_0%,#f8f5ef_52%,#f2eee7_100%)] z-10 relative overflow-hidden">
+    <div className="min-h-screen lg:flex bg-[#f7f5f0] font-sans">
+      <div className="flex-1 flex flex-col py-6 px-4 sm:px-6 lg:flex-none lg:w-[43%] lg:px-14 xl:px-20 bg-[radial-gradient(circle_at_top,#ffffff_0%,#f8f5ef_52%,#f2eee7_100%)] z-10 relative overflow-hidden">
         <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(15,23,42,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.04) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
-        <Link to="/" className="absolute top-6 left-6 flex items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors text-sm font-medium z-10">
+        <Link to="/" className="relative z-10 inline-flex w-fit items-center gap-2 text-slate-500 hover:text-indigo-600 transition-colors text-sm font-medium mb-6 lg:mt-2">
             <ChevronLeft size={16} />
             Retour
         </Link>
 
-        <div className="mx-auto w-full max-w-sm lg:w-full lg:max-w-[440px] relative z-10">
-          <div className="mb-4">
+        <div className="mx-auto my-auto w-full max-w-sm lg:w-full lg:max-w-[440px] relative z-10">
+          <div className="mb-4 sm:mb-5">
             <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-indigo-600 mb-2">FleetCommand Plus</p>
-            <h1 className="text-3xl lg:text-[2rem] font-extrabold text-slate-900 tracking-tight">Inscription en 2 etapes, plus claire et plus courte.</h1>
-            <p className="mt-2 text-sm text-slate-600 leading-relaxed">On distingue d'abord le type de compte, puis les informations d'acces. C'est plus net pour le parking, l'administration et les autres profils.</p>
+            <h1 className="text-2xl sm:text-3xl lg:text-[2rem] font-extrabold text-slate-900 tracking-tight">Inscription plus simple.</h1>
+            <p className="mt-2 text-sm text-slate-600 leading-relaxed">Deux étapes nettes, moins d’encombrement et moins de chevauchements sur mobile.</p>
           </div>
 
-          <div className="mt-5 bg-white/92 backdrop-blur-xl py-6 px-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] rounded-[28px] sm:px-7 border border-white/80">
+          <div className="mt-4 bg-white/92 backdrop-blur-xl py-5 px-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] rounded-[24px] sm:rounded-[28px] sm:px-7 border border-white/80">
             <div className="text-center mb-5">
                 <div className="flex items-center justify-center mb-4">
                   <BrandLogo size="sm" subtitle="L'app FleetCommand" />
@@ -231,7 +231,7 @@ export const RegisterPage: React.FC = () => {
               </div>
             ) : (
               <form className="space-y-4" onSubmit={handleSubmit}>
-                <div className="flex items-center justify-between gap-3">
+                <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
                   <div>
                     <h2 className="text-xl font-extrabold text-slate-900 tracking-tight">Entrez vos informations</h2>
                     <p className="mt-1 text-sm text-slate-500">Compte choisi: <span className="font-semibold text-slate-700">{selectedRoleConfig.label}</span></p>
@@ -489,7 +489,7 @@ export const RegisterPage: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isSubmitting || !isFormValid}
-                    className="group relative flex justify-center py-3 px-5 border border-transparent text-sm font-bold rounded-2xl text-white bg-slate-950 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-slate-400 transition-all duration-300 shadow-lg hover:shadow-indigo-500/30 hover:-translate-y-0.5"
+                    className="group relative flex w-full sm:w-auto justify-center py-3 px-5 border border-transparent text-sm font-bold rounded-2xl text-white bg-slate-950 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-indigo-500 disabled:bg-slate-400 transition-all duration-300 shadow-lg hover:shadow-indigo-500/30 hover:-translate-y-0.5"
                   >
                     {isSubmitting ? (
                         <Loader2 className="animate-spin h-5 w-5" />
@@ -517,7 +517,7 @@ export const RegisterPage: React.FC = () => {
             </p>
         </div>
         
-        <div className="absolute bottom-6 left-0 w-full text-center lg:text-left lg:pl-24 text-slate-400 text-xs">
+        <div className="relative z-10 mt-6 text-center lg:text-left lg:pl-0 text-slate-400 text-xs">
             © 2024 FleetCommand
         </div>
       </div>
