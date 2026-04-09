@@ -1,0 +1,222 @@
+import React, { useState } from 'react';
+import { useParams, Link } from 'react-router-dom';
+import { vehicles as allVehicles } from '../services/mockData';
+import { VehicleStatus, FuelType } from '../types';
+import { 
+  Car, Calendar, CheckCircle, MapPin, Star, Filter, 
+  ArrowRight, Zap, Droplet, Battery, Gauge, X, Phone, Users 
+} from 'lucide-react';
+
+export const PublicStorefront: React.FC = () => {
+  const { agencySlug } = useParams<{ agencySlug: string }>();
+  const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
+  const [showSuccess, setShowSuccess] = useState(false);
+
+  // Filter only active vehicles for the public
+  const availableVehicles = allVehicles.filter(v => v.status === VehicleStatus.Active);
+
+  // Mock Agency Data based on slug
+  const agencyName = agencySlug ? agencySlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Agence";
+
+  const handleBooking = (e: React.FormEvent) => {
+    e.preventDefault();
+    // Simulate API call
+    setTimeout(() => {
+        setSelectedVehicleId(null);
+        setShowSuccess(true);
+    }, 1000);
+  };
+
+  const getFuelIcon = (type: FuelType) => {
+    switch (type) {
+      case FuelType.Electric: return <Zap size={14} className="text-yellow-500" />;
+      case FuelType.Hybrid: return <Battery size={14} className="text-emerald-500" />;
+      default: return <Droplet size={14} className="text-blue-500" />;
+    }
+  };
+
+  if (showSuccess) {
+    return (
+        <div className="min-h-screen bg-slate-50 flex flex-col items-center justify-center p-4 text-center">
+            <div className="w-20 h-20 bg-emerald-100 rounded-full flex items-center justify-center mb-6 animate-bounce">
+                <CheckCircle className="text-emerald-600" size={40} />
+            </div>
+            <h2 className="text-3xl font-bold text-slate-800 mb-2">Demande Envoyée !</h2>
+            <p className="text-slate-600 max-w-md mb-8">
+                L'agence <strong>{agencyName}</strong> a bien reçu votre demande de réservation. Ils vous contacteront très prochainement par téléphone pour confirmer.
+            </p>
+            <button 
+                onClick={() => setShowSuccess(false)}
+                className="px-6 py-3 bg-slate-900 text-white rounded-xl font-medium hover:bg-slate-800 transition-colors"
+            >
+                Retour au catalogue
+            </button>
+        </div>
+    );
+  }
+
+  return (
+    <div className="min-h-screen bg-slate-50 font-sans selection:bg-indigo-100 selection:text-indigo-900">
+      {/* Public Header */}
+      <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+           <div className="flex items-center gap-3">
+              <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white">
+                  <Car size={24} />
+              </div>
+              <div>
+                  <h1 className="text-xl font-bold text-slate-900 leading-none">{agencyName}</h1>
+                  <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
+                      <MapPin size={10} />
+                      <span>Dakar, Sénégal</span>
+                      <span className="mx-1">•</span>
+                      <Star size={10} className="text-yellow-400 fill-yellow-400" />
+                      <span>4.8 (124 avis)</span>
+                  </div>
+              </div>
+           </div>
+           
+           <div className="hidden sm:flex items-center gap-4 text-sm font-medium text-slate-600">
+               <a href="#" className="hover:text-slate-900">À propos</a>
+               <a href="#" className="hover:text-slate-900">Conditions</a>
+               <a href="#" className="bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors">
+                   <Phone size={16} className="inline mr-2" />
+                   Contact
+               </a>
+           </div>
+        </div>
+      </header>
+
+      {/* Hero / Filter Area */}
+      <div className="bg-slate-900 text-white py-12 px-4">
+          <div className="max-w-7xl mx-auto text-center">
+              <h2 className="text-3xl md:text-5xl font-bold mb-4">Trouvez le véhicule parfait</h2>
+              <p className="text-slate-400 text-lg mb-8 max-w-2xl mx-auto">
+                  Découvrez notre flotte de véhicules premium disponibles immédiatement. Réservation simple, rapide et sans frais cachés.
+              </p>
+              
+              <div className="bg-white/10 backdrop-blur-md p-2 rounded-2xl inline-flex flex-wrap gap-2 max-w-full justify-center border border-white/20">
+                  <button className="px-4 py-2 bg-white text-slate-900 rounded-xl font-bold text-sm shadow-lg">Tout voir</button>
+                  <button className="px-4 py-2 hover:bg-white/10 rounded-xl font-medium text-sm transition-colors">SUV</button>
+                  <button className="px-4 py-2 hover:bg-white/10 rounded-xl font-medium text-sm transition-colors">Berlines</button>
+                  <button className="px-4 py-2 hover:bg-white/10 rounded-xl font-medium text-sm transition-colors">Électriques</button>
+                  <button className="px-4 py-2 hover:bg-white/10 rounded-xl font-medium text-sm transition-colors flex items-center gap-2"><Filter size={14}/> Filtres</button>
+              </div>
+          </div>
+      </div>
+
+      {/* Vehicle Grid */}
+      <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
+            {availableVehicles.map((vehicle) => (
+                <div key={vehicle.id} className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
+                    <div className="h-48 relative overflow-hidden">
+                        <img 
+                            src={vehicle.imageUrl} 
+                            alt={`${vehicle.make} ${vehicle.model}`} 
+                            className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
+                        />
+                        <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-xs font-bold text-slate-800 shadow-sm">
+                            {vehicle.year}
+                        </div>
+                    </div>
+                    <div className="p-5">
+                        <div className="flex justify-between items-start mb-2">
+                            <div>
+                                <h3 className="text-lg font-bold text-slate-900">{vehicle.make} {vehicle.model}</h3>
+                                <p className="text-sm text-slate-500">{vehicle.fuelType}</p>
+                            </div>
+                            <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center border border-slate-100">
+                                {getFuelIcon(vehicle.fuelType)}
+                            </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-2 my-4 text-xs text-slate-600">
+                             <div className="bg-slate-50 p-2 rounded-lg flex items-center gap-2">
+                                 <Gauge size={14} className="text-slate-400" /> Auto
+                             </div>
+                             <div className="bg-slate-50 p-2 rounded-lg flex items-center gap-2">
+                                 <Users size={14} className="text-slate-400" /> 5 Places
+                             </div>
+                        </div>
+
+                        <div className="flex items-end justify-between border-t border-slate-100 pt-4 mt-2">
+                             <div>
+                                 <p className="text-xs text-slate-400 font-medium uppercase">À partir de</p>
+                                 <p className="text-xl font-bold text-indigo-600">35,000 <span className="text-sm text-slate-600 font-normal">F/jour</span></p>
+                             </div>
+                             <button 
+                                onClick={() => setSelectedVehicleId(vehicle.id)}
+                                className="w-10 h-10 bg-slate-900 rounded-full flex items-center justify-center text-white hover:bg-indigo-600 transition-colors shadow-lg"
+                             >
+                                 <ArrowRight size={20} />
+                             </button>
+                        </div>
+                    </div>
+                </div>
+            ))}
+         </div>
+      </main>
+
+      {/* Booking Modal */}
+      {selectedVehicleId && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 backdrop-blur-sm p-4 animate-fade-in">
+            <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl scale-100 animate-scale-up">
+                <div className="relative h-32 bg-slate-900">
+                    <img 
+                        src={availableVehicles.find(v => v.id === selectedVehicleId)?.imageUrl} 
+                        className="w-full h-full object-cover opacity-50"
+                    />
+                    <button 
+                        onClick={() => setSelectedVehicleId(null)}
+                        className="absolute top-4 right-4 w-8 h-8 bg-black/20 text-white rounded-full flex items-center justify-center hover:bg-black/40 transition-colors"
+                    >
+                        <X size={18} />
+                    </button>
+                    <div className="absolute bottom-4 left-6 text-white">
+                        <p className="text-sm opacity-80">Réserver</p>
+                        <h3 className="text-2xl font-bold">
+                            {availableVehicles.find(v => v.id === selectedVehicleId)?.make} {availableVehicles.find(v => v.id === selectedVehicleId)?.model}
+                        </h3>
+                    </div>
+                </div>
+
+                <form onSubmit={handleBooking} className="p-6 space-y-4">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-700 uppercase">Départ</label>
+                            <input type="date" required className="w-full px-4 py-3 bg-slate-50 border-transparent rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-0 text-sm" />
+                        </div>
+                        <div className="space-y-1">
+                            <label className="text-xs font-bold text-slate-700 uppercase">Retour</label>
+                            <input type="date" required className="w-full px-4 py-3 bg-slate-50 border-transparent rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-0 text-sm" />
+                        </div>
+                    </div>
+                    
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-700 uppercase">Nom Complet</label>
+                        <input type="text" placeholder="Ex: Jean Dupont" required className="w-full px-4 py-3 bg-slate-50 border-transparent rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-0 text-sm" />
+                    </div>
+
+                    <div className="space-y-1">
+                        <label className="text-xs font-bold text-slate-700 uppercase">Téléphone (WhatsApp)</label>
+                        <input type="tel" placeholder="+221 ..." required className="w-full px-4 py-3 bg-slate-50 border-transparent rounded-xl focus:bg-white focus:border-indigo-500 focus:ring-0 text-sm" />
+                    </div>
+
+                    <div className="pt-4">
+                        <button type="submit" className="w-full py-4 bg-indigo-600 hover:bg-indigo-700 text-white font-bold rounded-xl shadow-lg shadow-indigo-200 transition-all flex items-center justify-center gap-2">
+                            Envoyer la demande <ArrowRight size={18} />
+                        </button>
+                        <p className="text-xs text-center text-slate-400 mt-3">Aucun paiement requis pour le moment.</p>
+                    </div>
+                </form>
+            </div>
+        </div>
+      )}
+
+      <footer className="bg-slate-900 text-slate-500 py-8 text-center text-sm">
+          <p>Propulsé par <Link to="/" className="text-indigo-400 hover:text-white transition-colors">FleetCommand</Link></p>
+      </footer>
+    </div>
+  );
+};
