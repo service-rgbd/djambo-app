@@ -37,7 +37,7 @@ const CATEGORIES = [
 const LANGUAGES = ['ES', 'EN', 'DE', 'FR', 'IT', 'PT'];
 const BRANDS = ['Toyota', 'Mercedes', 'BMW', 'Range Rover', 'Porsche', 'Audi', 'Volkswagen', 'Honda'];
 const HERO_IMAGE_SRC = new URL('../../login-images.jpg', import.meta.url).href;
-const HERO_VIDEO_SRC = 'https://fleetcommand-api.onrender.com/media/0_Business_Meeting_3840x2160.mp4';
+const HERO_VIDEO_SRC = '/media/0_Business_Meeting_3840x2160.mp4';
 
 const StarRow = ({ rating, count }: { rating: number; count: number }) => (
   <div className="flex items-center gap-1.5">
