@@ -36,7 +36,8 @@ const CATEGORIES = [
 
 const LANGUAGES = ['ES', 'EN', 'DE', 'FR', 'IT', 'PT'];
 const BRANDS = ['Toyota', 'Mercedes', 'BMW', 'Range Rover', 'Porsche', 'Audi', 'Volkswagen', 'Honda'];
-const HERO_VIDEO_SRC = new URL('../../0_Business_Meeting_3840x2160.mp4', import.meta.url).href;
+const HERO_IMAGE_SRC = new URL('../../login-images.jpg', import.meta.url).href;
+const HERO_VIDEO_SRC = 'https://fleetcommand-api.onrender.com/media/0_Business_Meeting_3840x2160.mp4';
 
 const StarRow = ({ rating, count }: { rating: number; count: number }) => (
   <div className="flex items-center gap-1.5">
@@ -66,6 +67,7 @@ export const LandingPage: React.FC = () => {
   const [ageConfirmed, setAgeConfirmed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeLanguage, setActiveLanguage] = useState('FR');
+  const [heroVideoReady, setHeroVideoReady] = useState(true);
 
   const featuredVehicles = useMemo(
     () => marketplaceVehicles.filter((vehicle) => vehicle.isAvailable).slice(0, 6),
@@ -144,10 +146,23 @@ export const LandingPage: React.FC = () => {
 
       <section className="relative overflow-hidden bg-slate-950 pt-24 text-white">
         <div className="absolute inset-0">
-          {HERO_VIDEO_SRC ? (
-            <video className="w-full h-full object-cover scale-[1.03]" autoPlay muted loop playsInline>
+          {heroVideoReady ? (
+            <video
+              className="w-full h-full object-cover scale-[1.03]"
+              autoPlay
+              muted
+              loop
+              playsInline
+              onError={() => setHeroVideoReady(false)}
+            >
               <source src={HERO_VIDEO_SRC} type="video/mp4" />
             </video>
+          ) : HERO_IMAGE_SRC ? (
+            <img
+              src={HERO_IMAGE_SRC}
+              alt="Presentation premium FleetCommand"
+              className="w-full h-full object-cover scale-[1.03]"
+            />
           ) : (
             <div className="h-full w-full bg-[radial-gradient(circle_at_top,#334155_0%,#0f172a_45%,#020617_100%)]" />
           )}

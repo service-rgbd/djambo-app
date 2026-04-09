@@ -8,6 +8,7 @@
     "api": "node server/index.mjs",
     "start": "node server/index.mjs",
     "build": "vite build",
+    "deploy:workers": "npm run build && wrangler deploy",
     "preview": "vite preview",
     "db:migrate": "node scripts/run-migration.mjs",
     "db:seed": "node scripts/seed-database.mjs"

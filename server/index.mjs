@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import postgres from 'postgres';
@@ -28,6 +29,7 @@ const allowedOrigins = (env.ALLOWED_ORIGINS || `${normalizedAppUrl},http://local
   .map((origin) => origin.trim())
   .filter(Boolean);
 const localOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+const mediaDirectory = workspaceRoot;
 
 const sendResendEmail = async ({ to, subject, html, text }) => {
   if (!resendApiKey) {
@@ -147,6 +149,15 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json());
+app.use('/media', express.static(mediaDirectory, {
+  fallthrough: false,
+  maxAge: '7d',
+  setHeaders: (res, filePath) => {
+    if (path.extname(filePath).toLowerCase() === '.mp4') {
+      res.setHeader('Cache-Control', 'public, max-age=604800, immutable');
+    }
+  },
+}));
 
 app.get('/api/auth/verify-email', async (req, res) => {
   try {
