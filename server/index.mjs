@@ -204,6 +204,10 @@ const isMissingColumnError = (error, columnName) => (
   error?.code === '42703' && String(error?.message || '').includes(columnName)
 );
 
+const isMissingPublicProfileColumnError = (error) => (
+  isMissingColumnError(error, 'store_slug') || isMissingColumnError(error, '.type')
+);
+
 const mapPublicOwnerProfile = (row) => ({
   id: row.owner_id || row.id,
   userId: row.user_id,
@@ -275,12 +279,12 @@ const mapPublicReview = (row) => ({
   createdAt: row.created_at,
 });
 
-const publicVehicleSelect = (includeStoreSlug = true) => sql`
+const publicVehicleSelect = ({ includeStoreSlug = true, includeOwnerType = true } = {}) => sql`
   select
     v.id,
     v.owner_id,
     op.user_id,
-    op.type as owner_type,
+    ${includeOwnerType ? sql`op.type as owner_type` : sql`null::text as owner_type`},
     op.display_name,
     op.description,
     op.address,
@@ -338,12 +342,12 @@ const getPublicVehicles = async () => {
       order by v.is_featured desc, v.created_at desc;
     `;
   } catch (error) {
-    if (!isMissingColumnError(error, 'store_slug')) {
+    if (!isMissingPublicProfileColumnError(error)) {
       throw error;
     }
 
     rows = await sql`
-      ${publicVehicleSelect(false)}
+      ${publicVehicleSelect({ includeStoreSlug: false, includeOwnerType: false })}
       from vehicles v
       join owner_profiles op on op.id = v.owner_id
       where v.is_for_rent = true or v.is_for_sale = true
@@ -366,12 +370,12 @@ const getPublicVehicleById = async (vehicleId) => {
       limit 1;
     `;
   } catch (error) {
-    if (!isMissingColumnError(error, 'store_slug')) {
+    if (!isMissingPublicProfileColumnError(error)) {
       throw error;
     }
 
     rows = await sql`
-      ${publicVehicleSelect(false)}
+      ${publicVehicleSelect({ includeStoreSlug: false, includeOwnerType: false })}
       from vehicles v
       join owner_profiles op on op.id = v.owner_id
       where v.id = ${vehicleId}
@@ -902,12 +906,12 @@ app.get('/api/marketplace/vehicles/:vehicleId', async (req, res) => {
             limit 3;
           `;
         } catch (error) {
-          if (!isMissingColumnError(error, 'store_slug')) {
+          if (!isMissingPublicProfileColumnError(error)) {
             throw error;
           }
 
           rows = await sql`
-            ${publicVehicleSelect(false)}
+            ${publicVehicleSelect({ includeStoreSlug: false, includeOwnerType: false })}
             from vehicles v
             join owner_profiles op on op.id = v.owner_id
             where v.id <> ${req.params.vehicleId}
@@ -998,12 +1002,12 @@ app.get('/api/marketplace/owners/:ownerId', async (req, res) => {
         limit 1;
       `;
     } catch (error) {
-      if (!isMissingColumnError(error, 'store_slug')) {
+      if (!isMissingPublicProfileColumnError(error)) {
         throw error;
       }
 
       rows = await sql`
-        select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+        select op.id, op.user_id, null::text as type, op.display_name, op.description, op.address, op.city, op.country,
                op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
                null::text as store_slug
         from owner_profiles op
@@ -1031,12 +1035,12 @@ app.get('/api/marketplace/owners/:ownerId', async (req, res) => {
             order by v.is_featured desc, v.created_at desc;
           `;
         } catch (error) {
-          if (!isMissingColumnError(error, 'store_slug')) {
+          if (!isMissingPublicProfileColumnError(error)) {
             throw error;
           }
 
           vehicleRows = await sql`
-            ${publicVehicleSelect(false)}
+            ${publicVehicleSelect({ includeStoreSlug: false, includeOwnerType: false })}
             from vehicles v
             join owner_profiles op on op.id = v.owner_id
             where v.owner_id = ${req.params.ownerId}
@@ -1061,7 +1065,7 @@ app.get('/api/storefront/:slug', async (req, res) => {
     let ownerRows;
     try {
       ownerRows = await sql`
-        select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+         select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
                op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
                aps.store_slug
         from owner_profiles op
@@ -1069,12 +1073,12 @@ app.get('/api/storefront/:slug', async (req, res) => {
         order by op.display_name;
       `;
     } catch (error) {
-      if (!isMissingColumnError(error, 'store_slug')) {
+      if (!isMissingPublicProfileColumnError(error)) {
         throw error;
       }
 
       ownerRows = await sql`
-        select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+        select op.id, op.user_id, null::text as type, op.display_name, op.description, op.address, op.city, op.country,
                op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
                null::text as store_slug
         from owner_profiles op
@@ -1100,12 +1104,12 @@ app.get('/api/storefront/:slug', async (req, res) => {
         order by v.is_featured desc, v.created_at desc;
       `;
     } catch (error) {
-      if (!isMissingColumnError(error, 'store_slug')) {
+      if (!isMissingPublicProfileColumnError(error)) {
         throw error;
       }
 
       vehicleRows = await sql`
-        ${publicVehicleSelect(false)}
+        ${publicVehicleSelect({ includeStoreSlug: false, includeOwnerType: false })}
         from vehicles v
         join owner_profiles op on op.id = v.owner_id
         where v.owner_id = ${matchedOwner.id}
