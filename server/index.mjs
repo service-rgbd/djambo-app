@@ -3,7 +3,7 @@ import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import postgres from 'postgres';
-import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
+import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { loadEnvConfig } from '../utils/loadEnv.mjs';
 
 const workspaceRoot = process.cwd();
@@ -97,11 +97,59 @@ const allowedMediaUploadScopes = new Map([
 ]);
 
 const buildPublicMediaUrl = (objectKey) => {
-  if (r2PublicBaseUrl) {
-    return `${r2PublicBaseUrl.replace(/\/$/, '')}/${objectKey}`;
+  return `${normalizedApiUrl.replace(/\/$/, '')}/api/media/${objectKey.replace(/^\/+/, '')}`;
+};
+
+const extractMediaObjectKey = (value) => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return '';
   }
 
-  return `/media/${objectKey}`;
+  const rawValue = value.trim();
+  const normalizedApiPrefix = `${normalizedApiUrl.replace(/\/$/, '')}/api/media/`;
+
+  if (rawValue.startsWith(normalizedApiPrefix)) {
+    return rawValue.slice(normalizedApiPrefix.length).replace(/^\/+/, '');
+  }
+
+  if (rawValue.startsWith('/api/media/')) {
+    return rawValue.replace(/^\/api\/media\//, '').replace(/^\/+/, '');
+  }
+
+  if (rawValue.startsWith('/media/')) {
+    return rawValue.replace(/^\/media\//, '').replace(/^\/+/, '');
+  }
+
+  try {
+    const parsedUrl = new URL(rawValue);
+    const host = parsedUrl.hostname.toLowerCase();
+
+    if (parsedUrl.pathname.startsWith('/api/media/')) {
+      return parsedUrl.pathname.replace(/^\/api\/media\//, '').replace(/^\/+/, '');
+    }
+
+    if (
+      host === 'cdn.djambo-app.com'
+      || host === 'media.djambo-app.com'
+      || host.endsWith('.r2.dev')
+      || (r2PublicBaseUrl && host === new URL(r2PublicBaseUrl).hostname.toLowerCase())
+    ) {
+      return parsedUrl.pathname.replace(/^\/+/, '');
+    }
+  } catch {
+    return '';
+  }
+
+  return '';
+};
+
+const normalizeStoredMediaUrl = (value) => {
+  if (typeof value !== 'string' || !value.trim()) {
+    return value || null;
+  }
+
+  const objectKey = extractMediaObjectKey(value);
+  return objectKey ? buildPublicMediaUrl(objectKey) : value;
 };
 
 const uploadBufferToR2 = async ({ folder, actorId, defaultName, buffer, contentType, fileName }) => {
@@ -265,9 +313,9 @@ const buildDefaultSettings = ({ user, ownerProfile, settingsRow }) => {
     contractSignatureEnabled: settingsRow?.contract_signature_enabled ?? true,
     notificationsEmail: settingsRow?.notifications_email ?? true,
     notificationsSms: settingsRow?.notifications_sms ?? false,
-    brandLogo: settingsRow?.brand_logo || undefined,
-    storefrontCover: settingsRow?.storefront_cover || undefined,
-    contractBanner: settingsRow?.contract_banner || undefined,
+    brandLogo: normalizeStoredMediaUrl(settingsRow?.brand_logo) || undefined,
+    storefrontCover: normalizeStoredMediaUrl(settingsRow?.storefront_cover) || undefined,
+    contractBanner: normalizeStoredMediaUrl(settingsRow?.contract_banner) || undefined,
   };
 };
 
@@ -686,6 +734,36 @@ app.post('/api/uploads/media', rawImageUpload, async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: error instanceof Error ? error.message : 'Upload image impossible.' });
+  }
+});
+
+app.get(/^\/api\/media\/(.+)$/, async (req, res) => {
+  try {
+    if (!r2Client || !env.R2_BUCKET_NAME) {
+      return res.status(503).json({ message: 'Le stockage media n est pas configure sur le backend.' });
+    }
+
+    const objectKey = decodeURIComponent(String(req.params[0] || '')).replace(/^\/+/, '');
+    if (!objectKey) {
+      return res.status(400).json({ message: 'Chemin media invalide.' });
+    }
+
+    const mediaResult = await r2Client.send(new GetObjectCommand({
+      Bucket: env.R2_BUCKET_NAME,
+      Key: objectKey,
+    }));
+
+    if (!mediaResult.Body) {
+      return res.status(404).json({ message: 'Media introuvable.' });
+    }
+
+    const mediaBuffer = Buffer.from(await mediaResult.Body.transformToByteArray());
+    res.setHeader('Content-Type', mediaResult.ContentType || 'application/octet-stream');
+    res.setHeader('Cache-Control', mediaResult.CacheControl || 'public, max-age=31536000, immutable');
+    return res.status(200).send(mediaBuffer);
+  } catch (error) {
+    console.error(error);
+    return res.status(404).json({ message: 'Media introuvable.' });
   }
 });
 
@@ -1433,7 +1511,7 @@ app.get('/api/owner/vehicles', async (req, res) => {
       isAvailable: vehicle.is_available,
       parkingId: vehicle.parking_id,
       parkingName: vehicle.parking_name,
-      imageUrl: vehicle.image_url,
+      imageUrl: normalizeStoredMediaUrl(vehicle.image_url),
     })));
   } catch (error) {
     console.error(error);
@@ -1541,7 +1619,7 @@ app.post('/api/owner/vehicles', async (req, res) => {
       isAvailable: insertedVehicle.is_available,
       parkingId: insertedVehicle.parking_id,
       parkingName: parking?.name || null,
-      imageUrl: vehicleImage?.image_url || null,
+      imageUrl: normalizeStoredMediaUrl(vehicleImage?.image_url) || null,
     });
   } catch (error) {
     console.error(error);
@@ -1932,7 +2010,7 @@ app.get('/api/dashboard/owner', async (req, res) => {
       nextAvailabilityTime: vehicle.occupied_until ? defaultVehicleReleaseTime : null,
       parkingId: vehicle.parking_id,
       parkingName: vehicle.parking_name,
-      imageUrl: vehicle.image_url,
+      imageUrl: normalizeStoredMediaUrl(vehicle.image_url),
     }));
 
     const vehiclesByParking = mappedVehicles.reduce((accumulator, vehicle) => {
