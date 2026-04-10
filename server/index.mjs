@@ -195,6 +195,199 @@ const sanitizeCustomerDetails = (details, user) => {
   };
 };
 
+const buildUserInitials = (fullName) => {
+  const parts = sanitizeText(fullName).split(/\s+/).filter(Boolean);
+  return (parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('') || 'DJ').slice(0, 2);
+};
+
+const mapPublicOwnerProfile = (row) => ({
+  id: row.owner_id || row.id,
+  userId: row.user_id,
+  type: row.owner_type || row.type,
+  displayName: row.display_name,
+  description: row.description || '',
+  address: row.address || '',
+  city: row.owner_city || row.city || '',
+  country: row.country || '',
+  rating: Number(row.owner_rating ?? row.rating ?? 0),
+  reviewCount: Number(row.owner_review_count ?? row.review_count ?? 0),
+  vehicleCount: Number(row.owner_vehicle_count ?? row.vehicle_count ?? 0),
+  verified: Boolean(row.verified),
+  whatsapp: row.whatsapp || '',
+  responseTime: row.response_time || 'Reponse en moins de 30 min',
+  memberSince: row.member_since,
+  storeSlug: row.store_slug || toSlug(row.display_name),
+});
+
+const mapPublicVehicle = (row) => {
+  const images = Array.isArray(row.images) ? row.images : [];
+
+  return {
+    id: row.id,
+    ownerId: row.owner_id,
+    ownerProfile: mapPublicOwnerProfile(row),
+    title: row.title,
+    brand: row.brand,
+    model: row.model,
+    year: row.year,
+    category: categoryFromDb[row.category] || row.category,
+    fuelType: fuelTypeFromDb[row.fuel_type] || row.fuel_type,
+    transmission: row.transmission,
+    seats: row.seats,
+    pricePerDay: row.price_per_day,
+    priceSale: row.price_sale || undefined,
+    isForRent: Boolean(row.is_for_rent),
+    isForSale: Boolean(row.is_for_sale),
+    description: row.description || '',
+    features: Array.isArray(row.features) ? row.features : [],
+    location: row.location,
+    city: row.city,
+    images: images.map((image, index) => ({
+      id: image.id || `${row.id}-img-${index + 1}`,
+      url: normalizeStoredMediaUrl(image.url),
+      alt: image.alt || row.title,
+    })),
+    rating: Number(row.rating || 0),
+    reviewCount: Number(row.review_count || 0),
+    viewCount: Number(row.view_count || 0),
+    isFeatured: Boolean(row.is_featured),
+    isAvailable: Boolean(row.is_available),
+    createdAt: row.created_at,
+    mileage: row.mileage || 0,
+    color: row.color || '',
+    conditions: row.conditions || '',
+  };
+};
+
+const mapPublicReview = (row) => ({
+  id: row.id,
+  userId: row.user_id,
+  userName: row.user_name,
+  userInitials: buildUserInitials(row.user_name),
+  vehicleId: row.vehicle_id,
+  ownerId: row.owner_id,
+  rating: Number(row.rating),
+  comment: row.comment,
+  createdAt: row.created_at,
+});
+
+const publicVehicleSelect = sql`
+  select
+    v.id,
+    v.owner_id,
+    op.user_id,
+    op.type as owner_type,
+    op.display_name,
+    op.description,
+    op.address,
+    op.city as owner_city,
+    op.country,
+    op.rating as owner_rating,
+    op.review_count as owner_review_count,
+    op.vehicle_count as owner_vehicle_count,
+    op.verified,
+    op.whatsapp,
+    op.response_time,
+    op.member_since,
+    aps.store_slug,
+    v.title,
+    v.brand,
+    v.model,
+    v.year,
+    v.category,
+    v.fuel_type,
+    v.transmission,
+    v.seats,
+    v.price_per_day,
+    v.price_sale,
+    v.is_for_rent,
+    v.is_for_sale,
+    v.description,
+    v.features,
+    v.location,
+    v.city,
+    v.rating,
+    v.review_count,
+    v.view_count,
+    v.is_featured,
+    v.is_available,
+    v.created_at,
+    v.mileage,
+    v.color,
+    v.conditions,
+    coalesce((
+      select json_agg(json_build_object('id', vi.id, 'url', vi.image_url, 'alt', coalesce(vi.alt_text, v.title)) order by vi.sort_order)
+      from vehicle_images vi
+      where vi.vehicle_id = v.id
+    ), '[]'::json) as images
+`;
+
+const getPublicVehicles = async () => {
+  const rows = await sql`
+    ${publicVehicleSelect}
+    from vehicles v
+    join owner_profiles op on op.id = v.owner_id
+    left join app_settings aps on aps.user_id = op.user_id
+    where v.is_for_rent = true or v.is_for_sale = true
+    order by v.is_featured desc, v.created_at desc;
+  `;
+
+  return rows.map(mapPublicVehicle);
+};
+
+const getPublicVehicleById = async (vehicleId) => {
+  const rows = await sql`
+    ${publicVehicleSelect}
+    from vehicles v
+    join owner_profiles op on op.id = v.owner_id
+    left join app_settings aps on aps.user_id = op.user_id
+    where v.id = ${vehicleId}
+    limit 1;
+  `;
+
+  return rows[0] ? mapPublicVehicle(rows[0]) : null;
+};
+
+const getPublicReviewsByVehicleId = async (vehicleId) => {
+  const rows = await sql`
+    select r.id, r.vehicle_id, r.owner_id, r.user_id, r.rating, r.comment, r.created_at, u.full_name as user_name
+    from reviews r
+    join app_users u on u.id = r.user_id
+    where r.vehicle_id = ${vehicleId}
+    order by r.created_at desc;
+  `;
+
+  return rows.map(mapPublicReview);
+};
+
+const getPublicReviewsByOwnerId = async (ownerId) => {
+  const rows = await sql`
+    select r.id, r.vehicle_id, r.owner_id, r.user_id, r.rating, r.comment, r.created_at, u.full_name as user_name
+    from reviews r
+    join app_users u on u.id = r.user_id
+    where r.owner_id = ${ownerId}
+    order by r.created_at desc;
+  `;
+
+  return rows.map(mapPublicReview);
+};
+
+const refreshVehicleAndOwnerRatings = async (vehicleId, ownerId) => {
+  await sql`
+    update vehicles
+    set rating = coalesce((select round(avg(r.rating)::numeric, 1) from reviews r where r.vehicle_id = ${vehicleId}), 0),
+        review_count = (select count(*)::int from reviews r where r.vehicle_id = ${vehicleId})
+    where id = ${vehicleId};
+  `;
+
+  await sql`
+    update owner_profiles
+    set rating = coalesce((select round(avg(r.rating)::numeric, 1) from reviews r where r.owner_id = ${ownerId}), 0),
+        review_count = (select count(*)::int from reviews r where r.owner_id = ${ownerId})
+    where id = ${ownerId};
+  `;
+};
+
 const buildOwnerNotificationFeed = ({ bookings, requestInbox, reviewFeed }) => {
   const bookingNotifications = bookings.map((booking) => ({
     id: `booking-${booking.id}`,
@@ -633,6 +826,184 @@ app.get('/api/auth/verify-email', async (req, res) => {
 app.get('/api/health', async (_req, res) => {
   const now = await sql`select now() as now`;
   res.json({ ok: true, service: 'djambo-api', now: now[0].now });
+});
+
+app.get('/api/marketplace/vehicles', async (_req, res) => {
+  try {
+    return res.json(await getPublicVehicles());
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Marketplace vehicles fetch failed' });
+  }
+});
+
+app.get('/api/marketplace/vehicles/:vehicleId', async (req, res) => {
+  try {
+    const vehicle = await getPublicVehicleById(req.params.vehicleId);
+    if (!vehicle) {
+      return res.status(404).json({ message: 'Vehicle not found' });
+    }
+
+    await sql`
+      update vehicles
+      set view_count = view_count + 1
+      where id = ${req.params.vehicleId};
+    `;
+
+    const [refreshedVehicle, reviews, relatedVehicles] = await Promise.all([
+      getPublicVehicleById(req.params.vehicleId),
+      getPublicReviewsByVehicleId(req.params.vehicleId),
+      (async () => {
+        const rows = await sql`
+          ${publicVehicleSelect}
+          from vehicles v
+          join owner_profiles op on op.id = v.owner_id
+          left join app_settings aps on aps.user_id = op.user_id
+          where v.id <> ${req.params.vehicleId}
+            and v.city = ${vehicle.city}
+            and (v.is_for_rent = true or v.is_for_sale = true)
+          order by v.is_featured desc, v.created_at desc
+          limit 3;
+        `;
+        return rows.map(mapPublicVehicle);
+      })(),
+    ]);
+
+    return res.json({ vehicle: refreshedVehicle, reviews, relatedVehicles });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Vehicle detail fetch failed' });
+  }
+});
+
+app.post('/api/marketplace/vehicles/:vehicleId/reviews', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Connectez-vous pour laisser un avis.' });
+    }
+
+    const vehicle = await sql`
+      select v.id, v.owner_id, op.user_id as owner_user_id
+      from vehicles v
+      join owner_profiles op on op.id = v.owner_id
+      where v.id = ${req.params.vehicleId}
+      limit 1;
+    `;
+
+    if (vehicle.length === 0) {
+      return res.status(404).json({ message: 'Vehicule introuvable.' });
+    }
+
+    const targetVehicle = vehicle[0];
+    if (targetVehicle.owner_user_id === userId) {
+      return res.status(403).json({ message: 'Vous ne pouvez pas commenter votre propre vehicule.' });
+    }
+
+    const rating = Math.max(1, Math.min(5, Number(req.body?.rating) || 0));
+    const comment = sanitizeText(req.body?.comment);
+    if (!rating || !comment) {
+      return res.status(400).json({ message: 'La note et le commentaire sont requis.' });
+    }
+
+    await sql`
+      insert into reviews (vehicle_id, owner_id, user_id, rating, comment)
+      values (${targetVehicle.id}, ${targetVehicle.owner_id}, ${userId}, ${rating}, ${comment})
+      on conflict (vehicle_id, user_id)
+      do update set rating = excluded.rating, comment = excluded.comment, created_at = now();
+    `;
+
+    await refreshVehicleAndOwnerRatings(targetVehicle.id, targetVehicle.owner_id);
+
+    const [updatedVehicle, updatedReviews] = await Promise.all([
+      getPublicVehicleById(targetVehicle.id),
+      getPublicReviewsByVehicleId(targetVehicle.id),
+    ]);
+
+    return res.status(201).json({
+      vehicle: updatedVehicle,
+      reviews: updatedReviews,
+      review: updatedReviews[0] || null,
+      message: 'Votre avis a bien ete enregistre.',
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Impossible d enregistrer votre avis.' });
+  }
+});
+
+app.get('/api/marketplace/owners/:ownerId', async (req, res) => {
+  try {
+    const rows = await sql`
+      select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+             op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
+             aps.store_slug
+      from owner_profiles op
+      left join app_settings aps on aps.user_id = op.user_id
+      where op.id = ${req.params.ownerId}
+      limit 1;
+    `;
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Owner not found' });
+    }
+
+    const ownerProfile = mapPublicOwnerProfile(rows[0]);
+    const [vehicles, reviews] = await Promise.all([
+      (async () => {
+        const vehicleRows = await sql`
+          ${publicVehicleSelect}
+          from vehicles v
+          join owner_profiles op on op.id = v.owner_id
+          left join app_settings aps on aps.user_id = op.user_id
+          where v.owner_id = ${req.params.ownerId}
+            and (v.is_for_rent = true or v.is_for_sale = true)
+          order by v.is_featured desc, v.created_at desc;
+        `;
+        return vehicleRows.map(mapPublicVehicle);
+      })(),
+      getPublicReviewsByOwnerId(req.params.ownerId),
+    ]);
+
+    return res.json({ ownerProfile, vehicles, reviews });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Owner profile fetch failed' });
+  }
+});
+
+app.get('/api/storefront/:slug', async (req, res) => {
+  try {
+    const ownerRows = await sql`
+      select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+             op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
+             aps.store_slug
+      from owner_profiles op
+      left join app_settings aps on aps.user_id = op.user_id
+      order by op.display_name;
+    `;
+
+    const matchedOwner = ownerRows.find((row) => (row.store_slug || toSlug(row.display_name)) === req.params.slug);
+    if (!matchedOwner) {
+      return res.status(404).json({ message: 'Storefront not found' });
+    }
+
+    const ownerProfile = mapPublicOwnerProfile(matchedOwner);
+    const vehicleRows = await sql`
+      ${publicVehicleSelect}
+      from vehicles v
+      join owner_profiles op on op.id = v.owner_id
+      left join app_settings aps on aps.user_id = op.user_id
+      where v.owner_id = ${matchedOwner.id}
+        and (v.is_for_rent = true or v.is_for_sale = true)
+      order by v.is_featured desc, v.created_at desc;
+    `;
+
+    return res.json({ ownerProfile, vehicles: vehicleRows.map(mapPublicVehicle) });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Storefront fetch failed' });
+  }
 });
 
 app.get('/api/customers', async (req, res) => {
