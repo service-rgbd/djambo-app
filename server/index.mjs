@@ -204,8 +204,14 @@ const isMissingColumnError = (error, columnName) => (
   error?.code === '42703' && String(error?.message || '').includes(columnName)
 );
 
+const isMissingRelationError = (error, relationName) => (
+  error?.code === '42P01' && String(error?.message || '').includes(relationName)
+);
+
 const isMissingPublicProfileColumnError = (error) => (
-  isMissingColumnError(error, 'store_slug') || isMissingColumnError(error, '.type')
+  isMissingColumnError(error, 'store_slug')
+  || isMissingColumnError(error, '.type')
+  || isMissingRelationError(error, 'app_settings')
 );
 
 const mapPublicOwnerProfile = (row) => ({
