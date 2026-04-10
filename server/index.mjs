@@ -200,6 +200,10 @@ const buildUserInitials = (fullName) => {
   return (parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('') || 'DJ').slice(0, 2);
 };
 
+const isMissingColumnError = (error, columnName) => (
+  error?.code === '42703' && String(error?.message || '').includes(columnName)
+);
+
 const mapPublicOwnerProfile = (row) => ({
   id: row.owner_id || row.id,
   userId: row.user_id,
@@ -271,7 +275,7 @@ const mapPublicReview = (row) => ({
   createdAt: row.created_at,
 });
 
-const publicVehicleSelect = sql`
+const publicVehicleSelect = (includeStoreSlug = true) => sql`
   select
     v.id,
     v.owner_id,
@@ -289,7 +293,7 @@ const publicVehicleSelect = sql`
     op.whatsapp,
     op.response_time,
     op.member_since,
-    aps.store_slug,
+    ${includeStoreSlug ? sql`aps.store_slug` : sql`null::text as store_slug`},
     v.title,
     v.brand,
     v.model,
@@ -323,27 +327,57 @@ const publicVehicleSelect = sql`
 `;
 
 const getPublicVehicles = async () => {
-  const rows = await sql`
-    ${publicVehicleSelect}
-    from vehicles v
-    join owner_profiles op on op.id = v.owner_id
-    left join app_settings aps on aps.user_id = op.user_id
-    where v.is_for_rent = true or v.is_for_sale = true
-    order by v.is_featured desc, v.created_at desc;
-  `;
+  let rows;
+  try {
+    rows = await sql`
+      ${publicVehicleSelect()}
+      from vehicles v
+      join owner_profiles op on op.id = v.owner_id
+      left join app_settings aps on aps.user_id = op.user_id
+      where v.is_for_rent = true or v.is_for_sale = true
+      order by v.is_featured desc, v.created_at desc;
+    `;
+  } catch (error) {
+    if (!isMissingColumnError(error, 'store_slug')) {
+      throw error;
+    }
+
+    rows = await sql`
+      ${publicVehicleSelect(false)}
+      from vehicles v
+      join owner_profiles op on op.id = v.owner_id
+      where v.is_for_rent = true or v.is_for_sale = true
+      order by v.is_featured desc, v.created_at desc;
+    `;
+  }
 
   return rows.map(mapPublicVehicle);
 };
 
 const getPublicVehicleById = async (vehicleId) => {
-  const rows = await sql`
-    ${publicVehicleSelect}
-    from vehicles v
-    join owner_profiles op on op.id = v.owner_id
-    left join app_settings aps on aps.user_id = op.user_id
-    where v.id = ${vehicleId}
-    limit 1;
-  `;
+  let rows;
+  try {
+    rows = await sql`
+      ${publicVehicleSelect()}
+      from vehicles v
+      join owner_profiles op on op.id = v.owner_id
+      left join app_settings aps on aps.user_id = op.user_id
+      where v.id = ${vehicleId}
+      limit 1;
+    `;
+  } catch (error) {
+    if (!isMissingColumnError(error, 'store_slug')) {
+      throw error;
+    }
+
+    rows = await sql`
+      ${publicVehicleSelect(false)}
+      from vehicles v
+      join owner_profiles op on op.id = v.owner_id
+      where v.id = ${vehicleId}
+      limit 1;
+    `;
+  }
 
   return rows[0] ? mapPublicVehicle(rows[0]) : null;
 };
@@ -854,17 +888,35 @@ app.get('/api/marketplace/vehicles/:vehicleId', async (req, res) => {
       getPublicVehicleById(req.params.vehicleId),
       getPublicReviewsByVehicleId(req.params.vehicleId),
       (async () => {
-        const rows = await sql`
-          ${publicVehicleSelect}
-          from vehicles v
-          join owner_profiles op on op.id = v.owner_id
-          left join app_settings aps on aps.user_id = op.user_id
-          where v.id <> ${req.params.vehicleId}
-            and v.city = ${vehicle.city}
-            and (v.is_for_rent = true or v.is_for_sale = true)
-          order by v.is_featured desc, v.created_at desc
-          limit 3;
-        `;
+        let rows;
+        try {
+          rows = await sql`
+            ${publicVehicleSelect()}
+            from vehicles v
+            join owner_profiles op on op.id = v.owner_id
+            left join app_settings aps on aps.user_id = op.user_id
+            where v.id <> ${req.params.vehicleId}
+              and v.city = ${vehicle.city}
+              and (v.is_for_rent = true or v.is_for_sale = true)
+            order by v.is_featured desc, v.created_at desc
+            limit 3;
+          `;
+        } catch (error) {
+          if (!isMissingColumnError(error, 'store_slug')) {
+            throw error;
+          }
+
+          rows = await sql`
+            ${publicVehicleSelect(false)}
+            from vehicles v
+            join owner_profiles op on op.id = v.owner_id
+            where v.id <> ${req.params.vehicleId}
+              and v.city = ${vehicle.city}
+              and (v.is_for_rent = true or v.is_for_sale = true)
+            order by v.is_featured desc, v.created_at desc
+            limit 3;
+          `;
+        }
         return rows.map(mapPublicVehicle);
       })(),
     ]);
@@ -934,15 +986,31 @@ app.post('/api/marketplace/vehicles/:vehicleId/reviews', async (req, res) => {
 
 app.get('/api/marketplace/owners/:ownerId', async (req, res) => {
   try {
-    const rows = await sql`
-      select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
-             op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
-             aps.store_slug
-      from owner_profiles op
-      left join app_settings aps on aps.user_id = op.user_id
-      where op.id = ${req.params.ownerId}
-      limit 1;
-    `;
+    let rows;
+    try {
+      rows = await sql`
+        select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+               op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
+               aps.store_slug
+        from owner_profiles op
+        left join app_settings aps on aps.user_id = op.user_id
+        where op.id = ${req.params.ownerId}
+        limit 1;
+      `;
+    } catch (error) {
+      if (!isMissingColumnError(error, 'store_slug')) {
+        throw error;
+      }
+
+      rows = await sql`
+        select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+               op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
+               null::text as store_slug
+        from owner_profiles op
+        where op.id = ${req.params.ownerId}
+        limit 1;
+      `;
+    }
 
     if (rows.length === 0) {
       return res.status(404).json({ message: 'Owner not found' });
@@ -951,15 +1019,31 @@ app.get('/api/marketplace/owners/:ownerId', async (req, res) => {
     const ownerProfile = mapPublicOwnerProfile(rows[0]);
     const [vehicles, reviews] = await Promise.all([
       (async () => {
-        const vehicleRows = await sql`
-          ${publicVehicleSelect}
-          from vehicles v
-          join owner_profiles op on op.id = v.owner_id
-          left join app_settings aps on aps.user_id = op.user_id
-          where v.owner_id = ${req.params.ownerId}
-            and (v.is_for_rent = true or v.is_for_sale = true)
-          order by v.is_featured desc, v.created_at desc;
-        `;
+        let vehicleRows;
+        try {
+          vehicleRows = await sql`
+            ${publicVehicleSelect()}
+            from vehicles v
+            join owner_profiles op on op.id = v.owner_id
+            left join app_settings aps on aps.user_id = op.user_id
+            where v.owner_id = ${req.params.ownerId}
+              and (v.is_for_rent = true or v.is_for_sale = true)
+            order by v.is_featured desc, v.created_at desc;
+          `;
+        } catch (error) {
+          if (!isMissingColumnError(error, 'store_slug')) {
+            throw error;
+          }
+
+          vehicleRows = await sql`
+            ${publicVehicleSelect(false)}
+            from vehicles v
+            join owner_profiles op on op.id = v.owner_id
+            where v.owner_id = ${req.params.ownerId}
+              and (v.is_for_rent = true or v.is_for_sale = true)
+            order by v.is_featured desc, v.created_at desc;
+          `;
+        }
         return vehicleRows.map(mapPublicVehicle);
       })(),
       getPublicReviewsByOwnerId(req.params.ownerId),
@@ -974,14 +1058,29 @@ app.get('/api/marketplace/owners/:ownerId', async (req, res) => {
 
 app.get('/api/storefront/:slug', async (req, res) => {
   try {
-    const ownerRows = await sql`
-      select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
-             op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
-             aps.store_slug
-      from owner_profiles op
-      left join app_settings aps on aps.user_id = op.user_id
-      order by op.display_name;
-    `;
+    let ownerRows;
+    try {
+      ownerRows = await sql`
+        select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+               op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
+               aps.store_slug
+        from owner_profiles op
+        left join app_settings aps on aps.user_id = op.user_id
+        order by op.display_name;
+      `;
+    } catch (error) {
+      if (!isMissingColumnError(error, 'store_slug')) {
+        throw error;
+      }
+
+      ownerRows = await sql`
+        select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
+               op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
+               null::text as store_slug
+        from owner_profiles op
+        order by op.display_name;
+      `;
+    }
 
     const matchedOwner = ownerRows.find((row) => (row.store_slug || toSlug(row.display_name)) === req.params.slug);
     if (!matchedOwner) {
@@ -989,15 +1088,31 @@ app.get('/api/storefront/:slug', async (req, res) => {
     }
 
     const ownerProfile = mapPublicOwnerProfile(matchedOwner);
-    const vehicleRows = await sql`
-      ${publicVehicleSelect}
-      from vehicles v
-      join owner_profiles op on op.id = v.owner_id
-      left join app_settings aps on aps.user_id = op.user_id
-      where v.owner_id = ${matchedOwner.id}
-        and (v.is_for_rent = true or v.is_for_sale = true)
-      order by v.is_featured desc, v.created_at desc;
-    `;
+    let vehicleRows;
+    try {
+      vehicleRows = await sql`
+        ${publicVehicleSelect()}
+        from vehicles v
+        join owner_profiles op on op.id = v.owner_id
+        left join app_settings aps on aps.user_id = op.user_id
+        where v.owner_id = ${matchedOwner.id}
+          and (v.is_for_rent = true or v.is_for_sale = true)
+        order by v.is_featured desc, v.created_at desc;
+      `;
+    } catch (error) {
+      if (!isMissingColumnError(error, 'store_slug')) {
+        throw error;
+      }
+
+      vehicleRows = await sql`
+        ${publicVehicleSelect(false)}
+        from vehicles v
+        join owner_profiles op on op.id = v.owner_id
+        where v.owner_id = ${matchedOwner.id}
+          and (v.is_for_rent = true or v.is_for_sale = true)
+        order by v.is_featured desc, v.created_at desc;
+      `;
+    }
 
     return res.json({ ownerProfile, vehicles: vehicleRows.map(mapPublicVehicle) });
   } catch (error) {
