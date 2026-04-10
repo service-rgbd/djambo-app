@@ -3,11 +3,15 @@ import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import postgres from 'postgres';
+import { PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { loadEnvConfig } from '../utils/loadEnv.mjs';
 
 const workspaceRoot = process.cwd();
 const env = loadEnvConfig(workspaceRoot);
 const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
+if (!databaseUrl) {
+  throw new Error('DATABASE_URL is required to start the Djambo API');
+}
 const port = Number(process.env.PORT || 8787);
 const app = express();
 const sql = postgres(databaseUrl, { max: 10, prepare: false });
@@ -15,7 +19,8 @@ const sql = postgres(databaseUrl, { max: 10, prepare: false });
 const hashPassword = (password) => crypto.scryptSync(password, 'fleetcommand-salt', 64).toString('hex');
 const hashVerificationToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 const resendApiKey = env.RESEND_API_KEY;
-const resendFromEmail = env.RESEND_FROM_EMAIL || 'FleetCommand <onboarding@resend.dev>';
+const resendFromEmail = env.RESEND_FROM_EMAIL || 'Djambo <onboarding@resend.dev>';
+const isProduction = process.env.NODE_ENV === 'production';
 const normalizedAppUrl = (() => {
   const rawUrl = env.APP_URL || 'http://localhost:3000';
   return /^https?:\/\//i.test(rawUrl) ? rawUrl : `https://${rawUrl}`;
@@ -30,10 +35,354 @@ const allowedOrigins = (env.ALLOWED_ORIGINS || `${normalizedAppUrl},http://local
   .filter(Boolean);
 const localOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const mediaDirectory = workspaceRoot;
+const defaultVehicleReleaseTime = '10:00';
+const uploadStorageProvider = env.UPLOAD_STORAGE_PROVIDER || 'local';
+const maxUploadSizeMb = Math.max(1, Number(env.MAX_UPLOAD_SIZE_MB || 10) || 10);
+const maxUploadSizeBytes = maxUploadSizeMb * 1024 * 1024;
+const r2PublicBaseUrl = env.R2_PUBLIC_BASE_URL || '';
+const r2Client = uploadStorageProvider === 'r2' && env.R2_ACCOUNT_ID && env.R2_BUCKET_NAME && env.R2_ACCESS_KEY_ID && env.R2_SECRET_ACCESS_KEY
+  ? new S3Client({
+      region: 'auto',
+      endpoint: `https://${env.R2_ACCOUNT_ID}.r2.cloudflarestorage.com`,
+      credentials: {
+        accessKeyId: env.R2_ACCESS_KEY_ID,
+        secretAccessKey: env.R2_SECRET_ACCESS_KEY,
+      },
+    })
+  : null;
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+const getRequestUserId = (req) => {
+  const userId = req.headers['x-user-id'];
+  if (!userId || Array.isArray(userId)) {
+    return null;
+  }
+
+  if (!uuidPattern.test(userId)) {
+    return null;
+  }
+
+  return userId;
+};
+
+const normalizeVehicleRequestType = (value) => {
+  return value === 'buy' ? 'BUY' : value === 'rent' ? 'RENT' : null;
+};
+
+const normalizeReservationMode = (value) => {
+  return value === 'on_site' ? 'ON_SITE' : value === 'direct_app' ? 'DIRECT_APP' : null;
+};
+
+const sanitizeText = (value) => typeof value === 'string' ? value.trim() : '';
+
+const slugifyFilePart = (value) => sanitizeText(value)
+  .normalize('NFD')
+  .replace(/[^a-zA-Z0-9._-]+/g, '-')
+  .replace(/-+/g, '-')
+  .replace(/^-|-$/g, '')
+  .toLowerCase();
+
+const allowedUploadContentTypes = new Map([
+  ['image/jpeg', 'jpg'],
+  ['image/png', 'png'],
+  ['image/webp', 'webp'],
+  ['image/avif', 'avif'],
+]);
+
+const allowedMediaUploadScopes = new Map([
+  ['brand-logo', 'branding'],
+  ['storefront-cover', 'storefronts'],
+  ['contract-banner', 'contracts'],
+]);
+
+const buildPublicMediaUrl = (objectKey) => {
+  if (r2PublicBaseUrl) {
+    return `${r2PublicBaseUrl.replace(/\/$/, '')}/${objectKey}`;
+  }
+
+  return `/media/${objectKey}`;
+};
+
+const uploadBufferToR2 = async ({ folder, actorId, defaultName, buffer, contentType, fileName }) => {
+  if (!r2Client || !env.R2_BUCKET_NAME) {
+    throw new Error('Le stockage R2 n est pas configure sur le backend.');
+  }
+
+  const extension = allowedUploadContentTypes.get(contentType) || 'bin';
+  const safeName = slugifyFilePart(path.basename(fileName || `upload.${extension}`, path.extname(fileName || '')) || defaultName || 'media');
+  const objectKey = `${folder}/${actorId}/${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${safeName || defaultName || 'image'}.${extension}`;
+
+  await r2Client.send(new PutObjectCommand({
+    Bucket: env.R2_BUCKET_NAME,
+    Key: objectKey,
+    Body: buffer,
+    ContentType: contentType,
+    CacheControl: 'public, max-age=31536000, immutable',
+  }));
+
+  return {
+    key: objectKey,
+    url: buildPublicMediaUrl(objectKey),
+  };
+};
+
+const getParkingLocationEditableAfter = (timestamp) => {
+  if (!timestamp) {
+    return null;
+  }
+
+  return new Date(new Date(timestamp).getTime() + (7 * 24 * 60 * 60 * 1000)).toISOString();
+};
+
+const sanitizeCustomerDetails = (details, user) => {
+  const source = details && typeof details === 'object' ? details : {};
+
+  return {
+    fullName: sanitizeText(source.fullName) || user.full_name || '',
+    email: sanitizeText(source.email) || user.email || '',
+    phone: sanitizeText(source.phone) || user.phone || '',
+    identityNumber: sanitizeText(source.identityNumber),
+    licenseNumber: sanitizeText(source.licenseNumber),
+  };
+};
+
+const buildOwnerNotificationFeed = ({ bookings, requestInbox, reviewFeed }) => {
+  const bookingNotifications = bookings.map((booking) => ({
+    id: `booking-${booking.id}`,
+    type: 'booking',
+    title: booking.status === 'PENDING' ? 'Nouvelle reservation en attente' : 'Reservation mise a jour',
+    detail: `${booking.renter_name} pour ${booking.vehicle_title}`,
+    status: booking.status,
+    createdAt: booking.created_at,
+  }));
+
+  const requestNotifications = requestInbox.map((request) => ({
+    id: `request-${request.id}`,
+    type: request.offered_price ? 'offer' : 'request',
+    title: request.booking_channel === 'ON_SITE' ? 'Passage sur place demande' : 'Reservation directe recue',
+    detail: `${request.customer_name} pour ${request.vehicle_title}`,
+    status: request.status,
+    createdAt: request.created_at,
+  }));
+
+  const reviewNotifications = reviewFeed.map((review) => ({
+    id: `review-${review.id}`,
+    type: 'review',
+    title: `Nouvel avis ${review.rating}/5`,
+    detail: `${review.user_name} a evalue ${review.vehicle_title}`,
+    status: 'NEW',
+    createdAt: review.created_at,
+  }));
+
+  return [...bookingNotifications, ...requestNotifications, ...reviewNotifications]
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .slice(0, 12);
+};
+
+const fuelTypeToDb = {
+  Essence: 'Petrol',
+  Petrol: 'Petrol',
+  Diesel: 'Diesel',
+  Hybride: 'Hybrid',
+  Hybrid: 'Hybrid',
+  'Électrique': 'Electric',
+  Electrique: 'Electric',
+  Electric: 'Electric',
+};
+
+const fuelTypeFromDb = {
+  Petrol: 'Essence',
+  Diesel: 'Diesel',
+  Hybrid: 'Hybride',
+  Electric: 'Électrique',
+};
+
+const categoryToDb = {
+  SUV: 'SUV',
+  Berline: 'BERLINE',
+  BERLINE: 'BERLINE',
+  Luxe: 'LUXE',
+  LUXE: 'LUXE',
+  'Économique': 'ECONOMIQUE',
+  Economique: 'ECONOMIQUE',
+  ECONOMIQUE: 'ECONOMIQUE',
+  Utilitaire: 'UTILITAIRE',
+  UTILITAIRE: 'UTILITAIRE',
+  'Pick-up': 'PICKUP',
+  PICKUP: 'PICKUP',
+  Cabriolet: 'CABRIOLET',
+  CABRIOLET: 'CABRIOLET',
+  Monospace: 'MONOSPACE',
+  MONOSPACE: 'MONOSPACE',
+};
+
+const categoryFromDb = {
+  SUV: 'SUV',
+  BERLINE: 'Berline',
+  LUXE: 'Luxe',
+  ECONOMIQUE: 'Économique',
+  UTILITAIRE: 'Utilitaire',
+  PICKUP: 'Pick-up',
+  CABRIOLET: 'Cabriolet',
+  MONOSPACE: 'Monospace',
+};
+
+const contractStatusFromDb = {
+  DRAFT: 'Paiement En Attente',
+  PENDING_PAYMENT: 'Paiement En Attente',
+  ACTIVE: 'Actif',
+  COMPLETED: 'Terminé',
+  CANCELLED: 'Annulé',
+};
+
+const toSlug = (value) => String(value || '')
+  .normalize('NFD')
+  .replace(/[\u0300-\u036f]/g, '')
+  .toLowerCase()
+  .replace(/[^a-z0-9]+/g, '-')
+  .replace(/^-+|-+$/g, '') || 'djambo';
+
+const buildDefaultSettings = ({ user, ownerProfile, settingsRow }) => {
+  const businessName = settingsRow?.business_name || ownerProfile?.display_name || user.full_name || 'Djambo Mobility';
+  const city = settingsRow?.city || ownerProfile?.city || user.profile_data?.city || 'Dakar';
+  const responseTime = settingsRow?.response_time || ownerProfile?.response_time || 'Reponse en moins de 30 min';
+  const storeSlug = settingsRow?.store_slug || toSlug(businessName);
+
+  return {
+    businessName,
+    publicEmail: settingsRow?.public_email || user.email || 'contact@djambo-app.com',
+    supportPhone: settingsRow?.support_phone || user.phone || ownerProfile?.whatsapp || '',
+    city,
+    responseTime,
+    storeSlug,
+    publicStoreUrl: settingsRow?.public_store_url || `${normalizedAppUrl}/#/store/${storeSlug}`,
+    publicProfileUrl: settingsRow?.public_profile_url || `${normalizedAppUrl}/#/profile/${storeSlug}`,
+    chauffeurOnDemand: settingsRow?.chauffeur_on_demand ?? true,
+    chauffeurDailyRate: String(settingsRow?.chauffeur_daily_rate ?? 30000),
+    deliveryEnabled: settingsRow?.delivery_enabled ?? true,
+    whatsappEnabled: settingsRow?.whatsapp_enabled ?? true,
+    contractSignatureEnabled: settingsRow?.contract_signature_enabled ?? true,
+    notificationsEmail: settingsRow?.notifications_email ?? true,
+    notificationsSms: settingsRow?.notifications_sms ?? false,
+    brandLogo: settingsRow?.brand_logo || undefined,
+    storefrontCover: settingsRow?.storefront_cover || undefined,
+    contractBanner: settingsRow?.contract_banner || undefined,
+  };
+};
+
+const mapParkingSummary = (parking, vehiclesByParking = {}) => ({
+  ...parking,
+  location_editable_after: getParkingLocationEditableAfter(parking.location_updated_at),
+  vehicles: vehiclesByParking[parking.id] || [],
+});
+
+const getOwnerProfileByUserId = async (userId) => {
+  const ownerRows = await sql`
+    select *
+    from owner_profiles
+    where user_id = ${userId}
+    limit 1;
+  `;
+
+  return ownerRows[0] || null;
+};
+
+const getCustomerSummariesByUserId = async (userId) => {
+  const ownerRows = await sql`
+    select id
+    from owner_profiles
+    where user_id = ${userId}
+    limit 1;
+  `;
+
+  if (ownerRows.length === 0) {
+    return [];
+  }
+
+  const ownerId = ownerRows[0].id;
+  const customerRows = await sql`
+    with customer_activity as (
+      select
+        u.id,
+        u.full_name,
+        u.email,
+        coalesce(u.phone, '') as phone,
+        b.total_price::int as amount,
+        b.created_at as activity_at,
+        v.title as vehicle_title,
+        'BOOKING'::text as source
+      from bookings b
+      join app_users u on u.id = b.renter_id
+      join vehicles v on v.id = b.vehicle_id
+      where b.owner_id = ${ownerId}
+
+      union all
+
+      select
+        u.id,
+        u.full_name,
+        u.email,
+        coalesce(u.phone, '') as phone,
+        coalesce(vr.estimated_total, vr.offered_price, 0)::int as amount,
+        vr.created_at as activity_at,
+        coalesce(v.title, vr.vehicle_title) as vehicle_title,
+        'REQUEST'::text as source
+      from vehicle_requests vr
+      join app_users u on u.id = vr.user_id
+      left join vehicles v on v.id = vr.vehicle_id
+      where vr.owner_id = ${ownerId}
+    )
+    select
+      id,
+      full_name,
+      email,
+      phone,
+      count(*) filter (where source = 'BOOKING')::int as total_bookings,
+      count(*) filter (where source = 'REQUEST')::int as total_requests,
+      coalesce(sum(amount) filter (where source = 'BOOKING'), 0)::int as total_spent,
+      max(activity_at) as last_activity_at,
+      (array_remove(array_agg(vehicle_title order by activity_at desc), null))[1] as preferred_vehicle
+    from customer_activity
+    group by id, full_name, email, phone
+    order by last_activity_at desc nulls last;
+  `;
+
+  return customerRows.map((customer) => {
+    const nameParts = String(customer.full_name || '').trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] || 'Client';
+    const lastName = nameParts.slice(1).join(' ') || 'Djambo';
+    const lastActivityAt = customer.last_activity_at ? new Date(customer.last_activity_at) : null;
+    const daysSinceActivity = lastActivityAt
+      ? Math.floor((Date.now() - lastActivityAt.getTime()) / 86400000)
+      : Number.POSITIVE_INFINITY;
+
+    return {
+      id: customer.id,
+      firstName,
+      lastName,
+      fullName: customer.full_name,
+      email: customer.email,
+      phone: customer.phone,
+      status: daysSinceActivity <= 45 ? 'Actif' : 'A relancer',
+      totalBookings: customer.total_bookings,
+      totalRequests: customer.total_requests,
+      totalSpent: customer.total_spent,
+      lastActivityAt: customer.last_activity_at,
+      preferredVehicle: customer.preferred_vehicle,
+    };
+  });
+};
 
 const sendResendEmail = async ({ to, subject, html, text }) => {
   if (!resendApiKey) {
-    throw new Error('RESEND_API_KEY is missing from environment');
+    if (isProduction) {
+      throw new Error('RESEND_API_KEY is missing from environment');
+    }
+
+    console.warn(`[email:dev-fallback] ${subject} -> ${to}`);
+    console.warn(text);
+    return { simulated: true };
   }
 
   const response = await fetch('https://api.resend.com/emails', {
@@ -58,13 +407,15 @@ const sendResendEmail = async ({ to, subject, html, text }) => {
     }
     throw new Error(`Resend error: ${payload}`);
   }
+
+  return { simulated: false };
 };
 
 const sendVerificationEmail = async ({ to, name, verificationUrl, role }) => {
   const html = `
     <div style="font-family:Arial,sans-serif;background:#f7f5f0;padding:32px;color:#0f172a;">
       <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:24px;padding:32px;border:1px solid #e2e8f0;box-shadow:0 24px 60px rgba(15,23,42,0.08);">
-        <p style="font-size:12px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#4f46e5;margin:0 0 16px;">FleetCommand</p>
+        <p style="font-size:12px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#4f46e5;margin:0 0 16px;">Djambo</p>
         <h1 style="font-size:28px;line-height:1.2;margin:0 0 12px;">Confirmez votre adresse email</h1>
         <p style="font-size:15px;line-height:1.6;color:#475569;margin:0 0 16px;">Bonjour ${name}, votre compte ${role.toLowerCase()} a bien ete cree. Cliquez sur le bouton ci-dessous pour activer l'acces.</p>
         <div style="margin:28px 0;">
@@ -77,11 +428,11 @@ const sendVerificationEmail = async ({ to, name, verificationUrl, role }) => {
     </div>
   `;
 
-  await sendResendEmail({
+  return sendResendEmail({
     to,
-    subject: 'Confirmez votre email FleetCommand',
+    subject: 'Confirmez votre email Djambo',
     html,
-    text: `Bonjour ${name}, confirmez votre adresse email FleetCommand ici : ${verificationUrl}`,
+    text: `Bonjour ${name}, confirmez votre adresse email Djambo ici : ${verificationUrl}`,
   });
 };
 
@@ -89,9 +440,9 @@ const sendPasswordResetEmail = async ({ to, name, resetUrl }) => {
   const html = `
     <div style="font-family:Arial,sans-serif;background:#f7f5f0;padding:32px;color:#0f172a;">
       <div style="max-width:560px;margin:0 auto;background:#ffffff;border-radius:24px;padding:32px;border:1px solid #e2e8f0;box-shadow:0 24px 60px rgba(15,23,42,0.08);">
-        <p style="font-size:12px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#4f46e5;margin:0 0 16px;">FleetCommand</p>
+        <p style="font-size:12px;font-weight:700;letter-spacing:0.18em;text-transform:uppercase;color:#4f46e5;margin:0 0 16px;">Djambo</p>
         <h1 style="font-size:28px;line-height:1.2;margin:0 0 12px;">Reinitialisez votre mot de passe</h1>
-        <p style="font-size:15px;line-height:1.6;color:#475569;margin:0 0 16px;">Bonjour ${name}, nous avons recu une demande de reinitialisation de mot de passe pour votre compte FleetCommand.</p>
+        <p style="font-size:15px;line-height:1.6;color:#475569;margin:0 0 16px;">Bonjour ${name}, nous avons recu une demande de reinitialisation de mot de passe pour votre compte Djambo.</p>
         <div style="margin:28px 0;">
           <a href="${resetUrl}" style="display:inline-block;background:#0f172a;color:#ffffff;text-decoration:none;padding:14px 22px;border-radius:16px;font-weight:700;">Choisir un nouveau mot de passe</a>
         </div>
@@ -102,11 +453,11 @@ const sendPasswordResetEmail = async ({ to, name, resetUrl }) => {
     </div>
   `;
 
-  await sendResendEmail({
+  return sendResendEmail({
     to,
-    subject: 'Reinitialisation de mot de passe FleetCommand',
+    subject: 'Reinitialisation de mot de passe Djambo',
     html,
-    text: `Bonjour ${name}, reinitialisez votre mot de passe FleetCommand ici : ${resetUrl}`,
+    text: `Bonjour ${name}, reinitialisez votre mot de passe Djambo ici : ${resetUrl}`,
   });
 };
 
@@ -148,7 +499,11 @@ app.use(cors({
   },
   credentials: true,
 }));
-app.use(express.json());
+app.use(express.json({ limit: '12mb' }));
+const rawImageUpload = express.raw({
+  type: (req) => String(req.headers['content-type'] || '').startsWith('image/'),
+  limit: `${maxUploadSizeMb}mb`,
+});
 app.use('/media', express.static(mediaDirectory, {
   fallthrough: false,
   maxAge: '7d',
@@ -214,7 +569,7 @@ app.get('/api/auth/verify-email', async (req, res) => {
 
     return res.send(renderVerificationPage({
       title: 'Adresse email confirmee',
-      description: `${verifiedUser.full_name}, votre compte est maintenant active. Vous pouvez vous connecter a FleetCommand.`,
+      description: `${verifiedUser.full_name}, votre compte est maintenant active. Vous pouvez vous connecter a Djambo.`,
       success: true,
     }));
   } catch (error) {
@@ -229,7 +584,109 @@ app.get('/api/auth/verify-email', async (req, res) => {
 
 app.get('/api/health', async (_req, res) => {
   const now = await sql`select now() as now`;
-  res.json({ ok: true, now: now[0].now });
+  res.json({ ok: true, service: 'djambo-api', now: now[0].now });
+});
+
+app.get('/api/customers', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const customers = await getCustomerSummariesByUserId(userId);
+    return res.json(customers);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Customers fetch failed' });
+  }
+});
+
+app.post('/api/uploads/vehicle-image', rawImageUpload, async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      return res.status(403).json({ message: 'Owner profile required' });
+    }
+
+    const contentType = String(req.headers['content-type'] || '').toLowerCase();
+    if (!allowedUploadContentTypes.has(contentType)) {
+      return res.status(400).json({ message: 'Format image non supporte. Utilisez JPG, PNG, WebP ou AVIF.' });
+    }
+
+    const body = req.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      return res.status(400).json({ message: 'Aucun fichier image recu.' });
+    }
+
+    if (body.length > maxUploadSizeBytes) {
+      return res.status(413).json({ message: `Image trop lourde. Maximum autorise: ${maxUploadSizeMb} Mo.` });
+    }
+
+    const fileNameHeader = sanitizeText(String(req.headers['x-file-name'] || 'vehicle-image'));
+    const uploadResult = await uploadBufferToR2({
+      folder: 'vehicles',
+      actorId: ownerProfile.id,
+      defaultName: 'vehicle',
+      buffer: body,
+      contentType,
+      fileName: decodeURIComponent(fileNameHeader || 'vehicle-image'),
+    });
+
+    return res.status(201).json(uploadResult);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: error instanceof Error ? error.message : 'Upload image impossible.' });
+  }
+});
+
+app.post('/api/uploads/media', rawImageUpload, async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const contentType = String(req.headers['content-type'] || '').toLowerCase();
+    if (!allowedUploadContentTypes.has(contentType)) {
+      return res.status(400).json({ message: 'Format image non supporte. Utilisez JPG, PNG, WebP ou AVIF.' });
+    }
+
+    const scopeHeader = sanitizeText(String(req.headers['x-upload-scope'] || '')).toLowerCase();
+    const folder = allowedMediaUploadScopes.get(scopeHeader);
+    if (!folder) {
+      return res.status(400).json({ message: 'Type d upload non supporte.' });
+    }
+
+    const body = req.body;
+    if (!Buffer.isBuffer(body) || body.length === 0) {
+      return res.status(400).json({ message: 'Aucun fichier image recu.' });
+    }
+
+    if (body.length > maxUploadSizeBytes) {
+      return res.status(413).json({ message: `Image trop lourde. Maximum autorise: ${maxUploadSizeMb} Mo.` });
+    }
+
+    const fileNameHeader = sanitizeText(String(req.headers['x-file-name'] || scopeHeader || 'media-image'));
+    const uploadResult = await uploadBufferToR2({
+      folder,
+      actorId: userId,
+      defaultName: scopeHeader || 'media',
+      buffer: body,
+      contentType,
+      fileName: decodeURIComponent(fileNameHeader || 'media-image'),
+    });
+
+    return res.status(201).json(uploadResult);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: error instanceof Error ? error.message : 'Upload image impossible.' });
+  }
 });
 
 app.post('/api/auth/register', async (req, res) => {
@@ -248,6 +705,10 @@ app.post('/api/auth/register', async (req, res) => {
       department: profileData?.department?.trim() || null,
       parkingName: profileData?.parkingName?.trim() || null,
       parkingCapacity: Number(profileData?.parkingCapacity || 0) || null,
+      parkingAddress: profileData?.parkingAddress?.trim() || null,
+      parkingLatitude: Number.isFinite(Number(profileData?.parkingLatitude)) ? Number(profileData.parkingLatitude) : null,
+      parkingLongitude: Number.isFinite(Number(profileData?.parkingLongitude)) ? Number(profileData.parkingLongitude) : null,
+      parkingLocationConfirmed: Boolean(profileData?.parkingLocationConfirmed),
     };
 
     if (!fullName || !normalizedEmail || !password) {
@@ -300,7 +761,7 @@ app.post('/api/auth/register', async (req, res) => {
           values (
             ${createdUser.id},
             ${displayName},
-            ${createdUser.role === 'PARC_AUTO' ? 'Nouvelle structure FleetCommand' : 'Nouveau profil FleetCommand'},
+            ${createdUser.role === 'PARC_AUTO' ? 'Nouvelle structure Djambo' : 'Nouveau profil Djambo'},
             ${''},
             ${safeProfileData.city},
             ${safeProfileData.country},
@@ -315,8 +776,35 @@ app.post('/api/auth/register', async (req, res) => {
 
       if (createdUser.role === 'PARC_AUTO') {
         await transaction`
-          insert into parkings (owner_id, name, city, address, access_type, opening_hours, security_features, capacity_total)
-          select id, ${safeProfileData.parkingName}, ${safeProfileData.city}, ${'Adresse a completer'}, ${'standard'}, ${'24/7'}, ${['Camera']}, ${safeProfileData.parkingCapacity || 10}
+          insert into parkings (
+            owner_id,
+            name,
+            city,
+            address,
+            access_type,
+            opening_hours,
+            security_features,
+            capacity_total,
+            latitude,
+            longitude,
+            location_source,
+            location_confirmed_at,
+            location_updated_at
+          )
+          select
+            id,
+            ${safeProfileData.parkingName},
+            ${safeProfileData.city},
+            ${safeProfileData.parkingAddress || safeProfileData.city || 'Adresse a completer'},
+            ${'standard'},
+            ${'24/7'},
+            ${['Camera']},
+            ${safeProfileData.parkingCapacity || 10},
+            ${safeProfileData.parkingLatitude},
+            ${safeProfileData.parkingLongitude},
+            ${safeProfileData.parkingLocationConfirmed ? 'gps_confirmed' : 'manual'},
+            ${safeProfileData.parkingLocationConfirmed ? new Date().toISOString() : null},
+            ${safeProfileData.parkingLocationConfirmed ? new Date().toISOString() : null}
           from owner_profiles
           where user_id = ${createdUser.id}
           and not exists (select 1 from parkings where owner_id = owner_profiles.id);
@@ -338,12 +826,35 @@ app.post('/api/auth/register', async (req, res) => {
 
     try {
       const verificationUrl = `${normalizedApiUrl}/api/auth/verify-email?token=${verificationToken}`;
-      await sendVerificationEmail({
+      const deliveryResult = await sendVerificationEmail({
         to: user.email,
         name: user.full_name,
         verificationUrl,
         role: user.role,
       });
+
+      if (deliveryResult?.simulated) {
+        await sql.begin(async (transaction) => {
+          await transaction`
+            update app_users
+            set email_verified = true
+            where id = ${user.id};
+          `;
+
+          await transaction`
+            update email_verification_tokens
+            set consumed_at = now()
+            where user_id = ${user.id}
+              and consumed_at is null;
+          `;
+        });
+
+        return res.status(201).json({
+          email: user.email,
+          requiresEmailVerification: false,
+          message: 'Compte cree en local sans fournisseur email. Le compte a ete active automatiquement pour le developpement.',
+        });
+      }
     } catch (sendError) {
       await sql`delete from app_users where id = ${user.id}`;
       throw sendError;
@@ -363,7 +874,7 @@ app.post('/api/auth/register', async (req, res) => {
 app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password } = req.body;
-    const result = await sql`select id, full_name, email, role, password_hash, email_verified from app_users where email = ${email}`;
+    const result = await sql`select id, full_name, email, role, phone, password_hash, email_verified from app_users where email = ${email}`;
     if (result.length === 0) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }
@@ -375,7 +886,7 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(403).json({ message: 'Veuillez confirmer votre adresse email avant de vous connecter.' });
     }
 
-    res.json({ id: user.id, name: user.full_name, email: user.email, role: user.role });
+    res.json({ id: user.id, name: user.full_name, email: user.email, role: user.role, phone: user.phone || undefined });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Login failed' });
@@ -483,6 +994,768 @@ app.post('/api/auth/reset-password', async (req, res) => {
   }
 });
 
+app.post('/api/vehicle-requests', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Connexion requise pour envoyer une demande.' });
+    }
+
+    const requestType = normalizeVehicleRequestType(req.body.requestType);
+    const bookingChannel = normalizeReservationMode(req.body.reservationMode);
+    const vehicleReference = typeof req.body.vehicleId === 'string' ? req.body.vehicleId.trim() : '';
+    const vehicleTitle = typeof req.body.vehicleTitle === 'string' ? req.body.vehicleTitle.trim() : '';
+    const ownerName = typeof req.body.ownerName === 'string' ? req.body.ownerName.trim() : '';
+    const startDate = typeof req.body.startDate === 'string' && req.body.startDate ? req.body.startDate : null;
+    const endDate = typeof req.body.endDate === 'string' && req.body.endDate ? req.body.endDate : null;
+    const pickupMode = typeof req.body.pickupMode === 'string' ? req.body.pickupMode.trim() : null;
+    const contactPreference = typeof req.body.contactPreference === 'string' ? req.body.contactPreference.trim() : null;
+    const message = typeof req.body.message === 'string' ? req.body.message.trim() : '';
+    const estimatedTotal = Number.isFinite(Number(req.body.estimatedTotal)) ? Number(req.body.estimatedTotal) : null;
+    const offeredPrice = Number.isFinite(Number(req.body.offeredPrice)) ? Number(req.body.offeredPrice) : null;
+
+    const [requestUser] = await sql`
+      select id, full_name, email, phone
+      from app_users
+      where id = ${userId}::uuid
+      limit 1;
+    `;
+
+    if (!requestUser) {
+      return res.status(404).json({ message: 'Utilisateur introuvable.' });
+    }
+
+    const customerDetails = sanitizeCustomerDetails(req.body.customerDetails, requestUser);
+
+    if (!requestType || !bookingChannel || !vehicleReference || !vehicleTitle) {
+      return res.status(400).json({ message: 'Informations de demande incomplètes.' });
+    }
+
+    if (requestType === 'RENT' && (!startDate || !endDate)) {
+      return res.status(400).json({ message: 'Les dates de location sont requises.' });
+    }
+
+    if (bookingChannel === 'DIRECT_APP') {
+      if (!customerDetails.fullName || !customerDetails.email || !customerDetails.phone || !customerDetails.identityNumber) {
+        return res.status(400).json({ message: 'Les informations d enregistrement sont requises pour une reservation directe.' });
+      }
+
+      if (requestType === 'RENT' && !customerDetails.licenseNumber) {
+        return res.status(400).json({ message: 'Le numero de permis est requis pour une reservation directe.' });
+      }
+    }
+
+    const matchedVehicleRows = uuidPattern.test(vehicleReference)
+      ? await sql`
+          select v.id, v.title, v.owner_id, v.is_for_rent, v.is_for_sale, v.is_available, v.price_per_day, op.display_name
+          from vehicles v
+          left join owner_profiles op on op.id = v.owner_id
+          where v.id = ${vehicleReference}::uuid
+          limit 1;
+        `
+      : await sql`
+          select v.id, v.title, v.owner_id, v.is_for_rent, v.is_for_sale, v.is_available, v.price_per_day, op.display_name
+          from vehicles v
+          left join owner_profiles op on op.id = v.owner_id
+          where lower(v.title) = lower(${vehicleTitle})
+          limit 1;
+        `;
+
+    const matchedVehicle = matchedVehicleRows[0] || null;
+
+    if (matchedVehicle && requestType === 'RENT') {
+      if (!matchedVehicle.is_for_rent) {
+        return res.status(400).json({ message: 'Ce vehicule n est pas disponible a la location.' });
+      }
+      if (!matchedVehicle.is_available) {
+        return res.status(400).json({ message: 'Ce vehicule n est pas disponible pour la periode demandee.' });
+      }
+
+      const conflictingBookings = await sql`
+        select id
+        from bookings
+        where vehicle_id = ${matchedVehicle.id}
+          and status in ('PENDING', 'CONFIRMED')
+          and daterange(start_date, end_date, '[]') && daterange(${startDate}, ${endDate}, '[]')
+        limit 1;
+      `;
+
+      if (conflictingBookings.length > 0) {
+        return res.status(409).json({ message: 'La periode choisie n est plus disponible. Merci de selectionner d autres dates.' });
+      }
+    }
+
+    if (matchedVehicle && requestType === 'BUY' && !matchedVehicle.is_for_sale) {
+      return res.status(400).json({ message: 'Ce vehicule n est pas propose a la vente.' });
+    }
+
+    const snapshot = {
+      vehicleReference,
+      vehicleTitle,
+      ownerName: ownerName || matchedVehicle?.display_name || null,
+      requestType,
+      bookingChannel,
+      startDate,
+      endDate,
+      pickupMode,
+      contactPreference,
+      estimatedTotal,
+      offeredPrice,
+      message,
+      customerDetails,
+    };
+
+    const insertedRows = await sql`
+      insert into vehicle_requests (
+        user_id,
+        vehicle_id,
+        owner_id,
+        vehicle_reference,
+        vehicle_title,
+        owner_name,
+        request_type,
+        booking_channel,
+        start_date,
+        end_date,
+        estimated_total,
+        offered_price,
+        pickup_mode,
+        contact_preference,
+        message,
+        customer_details,
+        request_snapshot
+      ) values (
+        ${userId}::uuid,
+        ${matchedVehicle?.id || null},
+        ${matchedVehicle?.owner_id || null},
+        ${vehicleReference},
+        ${vehicleTitle},
+        ${ownerName || matchedVehicle?.display_name || null},
+        ${requestType},
+        ${bookingChannel},
+        ${startDate},
+        ${endDate},
+        ${estimatedTotal},
+        ${offeredPrice},
+        ${pickupMode},
+        ${contactPreference},
+        ${message || null},
+        ${JSON.stringify(customerDetails)}::jsonb,
+        ${JSON.stringify(snapshot)}::jsonb
+      )
+      returning id, request_type, status;
+    `;
+
+    return res.status(201).json({
+      id: insertedRows[0].id,
+      requestType: insertedRows[0].request_type,
+      status: insertedRows[0].status,
+      message: bookingChannel === 'ON_SITE'
+        ? 'Votre demande de passage sur place a ete transmise au proprietaire.'
+        : requestType === 'BUY'
+        ? 'Votre intention d achat a ete enregistree et transmise au vendeur.'
+        : 'Votre demande de location a ete enregistree et transmise au proprietaire.',
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Impossible d enregistrer votre demande pour le moment.' });
+  }
+});
+
+app.put('/api/owner/parkings/:parkingId/location', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const { parkingId } = req.params;
+    if (!uuidPattern.test(parkingId)) {
+      return res.status(400).json({ message: 'Parking invalide.' });
+    }
+
+    const address = sanitizeText(req.body.address);
+    const city = sanitizeText(req.body.city);
+    const latitude = Number(req.body.latitude);
+    const longitude = Number(req.body.longitude);
+
+    if (!address || !city || !Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+      return res.status(400).json({ message: 'Adresse ou coordonnees invalides.' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      return res.status(404).json({ message: 'Profil proprietaire introuvable.' });
+    }
+
+    const parkingRows = await sql`
+      select id, name, city, address, latitude, longitude, location_confirmed_at, location_updated_at
+      from parkings
+      where id = ${parkingId}::uuid
+        and owner_id = ${ownerProfile.id}
+      limit 1;
+    `;
+
+    if (parkingRows.length === 0) {
+      return res.status(404).json({ message: 'Parking introuvable.' });
+    }
+
+    const parking = parkingRows[0];
+    const editableAfter = getParkingLocationEditableAfter(parking.location_updated_at);
+    if (editableAfter && new Date(editableAfter).getTime() > Date.now()) {
+      return res.status(423).json({
+        message: `Cette localisation ne peut etre modifiee qu a partir du ${new Date(editableAfter).toLocaleDateString('fr-FR')}.`,
+      });
+    }
+
+    const updatedRows = await sql`
+      update parkings
+      set address = ${address},
+          city = ${city},
+          latitude = ${latitude},
+          longitude = ${longitude},
+          location_source = ${'gps_confirmed'},
+          location_confirmed_at = now(),
+          location_updated_at = now()
+      where id = ${parkingId}::uuid
+      returning id, name, city, address, latitude, longitude, location_source, location_confirmed_at, location_updated_at;
+    `;
+
+    return res.json({
+      ...updatedRows[0],
+      location_editable_after: getParkingLocationEditableAfter(updatedRows[0].location_updated_at),
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Impossible de mettre a jour la localisation du parking.' });
+  }
+});
+
+app.get('/api/settings', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const [user] = await sql`
+      select id, full_name, email, phone, profile_data
+      from app_users
+      where id = ${userId}
+      limit 1;
+    `;
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    const [settingsRow] = await sql`
+      select *
+      from app_settings
+      where user_id = ${userId}
+      limit 1;
+    `;
+
+    return res.json(buildDefaultSettings({ user, ownerProfile, settingsRow }));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Settings fetch failed' });
+  }
+});
+
+app.put('/api/settings', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const payload = req.body || {};
+    const supportPhone = typeof payload.supportPhone === 'string' ? payload.supportPhone.trim() : '';
+    const businessName = typeof payload.businessName === 'string' ? payload.businessName.trim() : 'Djambo Mobility';
+    const city = typeof payload.city === 'string' ? payload.city.trim() : 'Dakar';
+    const responseTime = typeof payload.responseTime === 'string' ? payload.responseTime.trim() : 'Reponse en moins de 30 min';
+    const storeSlug = toSlug(payload.storeSlug || businessName);
+
+    const [user] = await sql`
+      select id, full_name, email, phone, profile_data
+      from app_users
+      where id = ${userId}
+      limit 1;
+    `;
+
+    if (!user) {
+      return res.status(404).json({ message: 'User not found' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+
+    await sql.begin(async (transaction) => {
+      await transaction`
+        update app_users
+        set phone = ${supportPhone || null},
+            profile_data = jsonb_set(coalesce(profile_data, '{}'::jsonb), '{city}', to_jsonb(${city}), true)
+        where id = ${userId};
+      `;
+
+      if (ownerProfile) {
+        await transaction`
+          update owner_profiles
+          set display_name = ${businessName},
+              city = ${city},
+              response_time = ${responseTime},
+              whatsapp = ${supportPhone || null}
+          where user_id = ${userId};
+        `;
+      }
+
+      await transaction`
+        insert into app_settings (
+          user_id, business_name, public_email, support_phone, city, response_time, store_slug,
+          public_store_url, public_profile_url, chauffeur_on_demand, chauffeur_daily_rate,
+          delivery_enabled, whatsapp_enabled, contract_signature_enabled,
+          notifications_email, notifications_sms, brand_logo, storefront_cover, contract_banner
+        ) values (
+          ${userId},
+          ${businessName},
+          ${typeof payload.publicEmail === 'string' ? payload.publicEmail.trim() : user.email},
+          ${supportPhone || null},
+          ${city},
+          ${responseTime},
+          ${storeSlug},
+          ${typeof payload.publicStoreUrl === 'string' ? payload.publicStoreUrl.trim() : `${normalizedAppUrl}/#/store/${storeSlug}`},
+          ${typeof payload.publicProfileUrl === 'string' ? payload.publicProfileUrl.trim() : `${normalizedAppUrl}/#/profile/${storeSlug}`},
+          ${Boolean(payload.chauffeurOnDemand)},
+          ${Number(payload.chauffeurDailyRate || 0) || 0},
+          ${Boolean(payload.deliveryEnabled)},
+          ${Boolean(payload.whatsappEnabled)},
+          ${Boolean(payload.contractSignatureEnabled)},
+          ${Boolean(payload.notificationsEmail)},
+          ${Boolean(payload.notificationsSms)},
+          ${typeof payload.brandLogo === 'string' ? payload.brandLogo : null},
+          ${typeof payload.storefrontCover === 'string' ? payload.storefrontCover : null},
+          ${typeof payload.contractBanner === 'string' ? payload.contractBanner : null}
+        )
+        on conflict (user_id) do update set
+          business_name = excluded.business_name,
+          public_email = excluded.public_email,
+          support_phone = excluded.support_phone,
+          city = excluded.city,
+          response_time = excluded.response_time,
+          store_slug = excluded.store_slug,
+          public_store_url = excluded.public_store_url,
+          public_profile_url = excluded.public_profile_url,
+          chauffeur_on_demand = excluded.chauffeur_on_demand,
+          chauffeur_daily_rate = excluded.chauffeur_daily_rate,
+          delivery_enabled = excluded.delivery_enabled,
+          whatsapp_enabled = excluded.whatsapp_enabled,
+          contract_signature_enabled = excluded.contract_signature_enabled,
+          notifications_email = excluded.notifications_email,
+          notifications_sms = excluded.notifications_sms,
+          brand_logo = excluded.brand_logo,
+          storefront_cover = excluded.storefront_cover,
+          contract_banner = excluded.contract_banner,
+          updated_at = now();
+      `;
+    });
+
+    const refreshedOwner = await getOwnerProfileByUserId(userId);
+    const [settingsRow] = await sql`
+      select *
+      from app_settings
+      where user_id = ${userId}
+      limit 1;
+    `;
+
+    return res.json(buildDefaultSettings({ user: { ...user, phone: supportPhone }, ownerProfile: refreshedOwner, settingsRow }));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Settings update failed' });
+  }
+});
+
+app.get('/api/owner/vehicles', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      return res.json([]);
+    }
+
+    const vehicles = await sql`
+      select
+        v.id,
+        v.title,
+        v.brand,
+        v.model,
+        v.year,
+        v.category,
+        v.fuel_type,
+        v.transmission,
+        v.seats,
+        v.price_per_day,
+        v.city,
+        v.location,
+        v.description,
+        v.mileage,
+        v.color,
+        v.is_available,
+        v.parking_id,
+        p.name as parking_name,
+        (select image_url from vehicle_images where vehicle_id = v.id order by sort_order asc limit 1) as image_url
+      from vehicles v
+      left join parkings p on p.id = v.parking_id
+      where v.owner_id = ${ownerProfile.id}
+      order by v.created_at desc;
+    `;
+
+    return res.json(vehicles.map((vehicle) => ({
+      id: vehicle.id,
+      title: vehicle.title,
+      brand: vehicle.brand,
+      model: vehicle.model,
+      year: vehicle.year,
+      category: categoryFromDb[vehicle.category] || vehicle.category,
+      fuelType: fuelTypeFromDb[vehicle.fuel_type] || vehicle.fuel_type,
+      transmission: vehicle.transmission,
+      seats: vehicle.seats,
+      pricePerDay: vehicle.price_per_day,
+      city: vehicle.city,
+      location: vehicle.location,
+      description: vehicle.description,
+      mileage: vehicle.mileage,
+      color: vehicle.color,
+      isAvailable: vehicle.is_available,
+      parkingId: vehicle.parking_id,
+      parkingName: vehicle.parking_name,
+      imageUrl: vehicle.image_url,
+    })));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Owner vehicles fetch failed' });
+  }
+});
+
+app.post('/api/owner/vehicles', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      return res.status(403).json({ message: 'Owner profile required' });
+    }
+
+    const payload = req.body || {};
+    const fuelType = fuelTypeToDb[payload.fuelType];
+    const category = categoryToDb[payload.category];
+
+    if (!payload.title || !payload.brand || !payload.model || !fuelType || !category || !payload.city || !payload.location || !payload.description) {
+      return res.status(400).json({ message: 'Vehicle payload is incomplete' });
+    }
+
+    const insertedVehicle = await sql.begin(async (transaction) => {
+      const rows = await transaction`
+        insert into vehicles (
+          owner_id, title, brand, model, year, category, fuel_type, transmission, seats,
+          price_per_day, is_for_rent, is_for_sale, description, features, location, city,
+          mileage, color, is_available, parking_id
+        ) values (
+          ${ownerProfile.id},
+          ${String(payload.title).trim()},
+          ${String(payload.brand).trim()},
+          ${String(payload.model).trim()},
+          ${Number(payload.year) || new Date().getFullYear()},
+          ${category}::vehicle_category,
+          ${fuelType}::fuel_type_enum,
+          ${payload.transmission === 'Manuelle' ? 'Manuelle' : 'Automatique'}::transmission_type,
+          ${Math.max(1, Number(payload.seats) || 5)},
+          ${Math.max(0, Number(payload.pricePerDay) || 0)},
+          true,
+          false,
+          ${String(payload.description).trim()},
+          ${[]},
+          ${String(payload.location).trim()},
+          ${String(payload.city).trim()},
+          ${Math.max(0, Number(payload.mileage) || 0)},
+          ${payload.color ? String(payload.color).trim() : null},
+          ${Boolean(payload.isAvailable)},
+          ${payload.parkingId || null}
+        ) returning *;
+      `;
+
+      const vehicle = rows[0];
+
+      if (typeof payload.imageUrl === 'string' && payload.imageUrl.trim()) {
+        await transaction`
+          insert into vehicle_images (vehicle_id, image_url, alt_text, sort_order)
+          values (${vehicle.id}, ${payload.imageUrl.trim()}, ${vehicle.title}, 0);
+        `;
+      }
+
+      await transaction`
+        update owner_profiles
+        set vehicle_count = (
+          select count(*)::int from vehicles where owner_id = ${ownerProfile.id}
+        )
+        where id = ${ownerProfile.id};
+      `;
+
+      return vehicle;
+    });
+
+    const [vehicleImage] = await sql`
+      select image_url
+      from vehicle_images
+      where vehicle_id = ${insertedVehicle.id}
+      order by sort_order asc
+      limit 1;
+    `;
+    const [parking] = insertedVehicle.parking_id ? await sql`
+      select name from parkings where id = ${insertedVehicle.parking_id} limit 1;
+    ` : [null];
+
+    return res.status(201).json({
+      id: insertedVehicle.id,
+      title: insertedVehicle.title,
+      brand: insertedVehicle.brand,
+      model: insertedVehicle.model,
+      year: insertedVehicle.year,
+      category: categoryFromDb[insertedVehicle.category] || insertedVehicle.category,
+      fuelType: fuelTypeFromDb[insertedVehicle.fuel_type] || insertedVehicle.fuel_type,
+      transmission: insertedVehicle.transmission,
+      seats: insertedVehicle.seats,
+      pricePerDay: insertedVehicle.price_per_day,
+      city: insertedVehicle.city,
+      location: insertedVehicle.location,
+      description: insertedVehicle.description,
+      mileage: insertedVehicle.mileage,
+      color: insertedVehicle.color,
+      isAvailable: insertedVehicle.is_available,
+      parkingId: insertedVehicle.parking_id,
+      parkingName: parking?.name || null,
+      imageUrl: vehicleImage?.image_url || null,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Vehicle creation failed' });
+  }
+});
+
+app.delete('/api/owner/vehicles/:vehicleId', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      return res.status(403).json({ message: 'Owner profile required' });
+    }
+
+    const vehicleId = req.params.vehicleId;
+    const deletedRows = await sql`
+      delete from vehicles
+      where id = ${vehicleId}::uuid and owner_id = ${ownerProfile.id}
+      returning id;
+    `;
+
+    if (deletedRows.length === 0) {
+      return res.status(404).json({ message: 'Vehicle not found' });
+    }
+
+    await sql`
+      update owner_profiles
+      set vehicle_count = (
+        select count(*)::int from vehicles where owner_id = ${ownerProfile.id}
+      )
+      where id = ${ownerProfile.id};
+    `;
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Vehicle deletion failed' });
+  }
+});
+
+app.get('/api/contracts', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    const rows = ownerProfile
+      ? await sql`
+          select
+            c.id,
+            c.contract_number,
+            c.customer_id,
+            c.vehicle_id,
+            c.start_date,
+            c.end_date,
+            c.total_amount,
+            c.daily_rate,
+            c.status,
+            c.payment_method,
+            c.chauffeur_requested,
+            c.chauffeur_rate,
+            c.generated_at,
+            u.full_name as customer_name,
+            u.email as customer_email,
+            coalesce(u.phone, '') as customer_phone,
+            concat(v.brand, ' ', v.model) as vehicle_label
+          from contracts c
+          join app_users u on u.id = c.customer_id
+          join vehicles v on v.id = c.vehicle_id
+          where c.owner_id = ${ownerProfile.id}
+          order by c.generated_at desc, c.created_at desc;
+        `
+      : await sql`
+          select
+            c.id,
+            c.contract_number,
+            c.customer_id,
+            c.vehicle_id,
+            c.start_date,
+            c.end_date,
+            c.total_amount,
+            c.daily_rate,
+            c.status,
+            c.payment_method,
+            c.chauffeur_requested,
+            c.chauffeur_rate,
+            c.generated_at,
+            u.full_name as customer_name,
+            u.email as customer_email,
+            coalesce(u.phone, '') as customer_phone,
+            concat(v.brand, ' ', v.model) as vehicle_label
+          from contracts c
+          join app_users u on u.id = c.customer_id
+          join vehicles v on v.id = c.vehicle_id
+          where c.customer_id = ${userId}
+          order by c.generated_at desc, c.created_at desc;
+        `;
+
+    return res.json(rows.map((contract) => ({
+      id: contract.id,
+      contractNumber: contract.contract_number,
+      customerId: contract.customer_id,
+      vehicleId: contract.vehicle_id,
+      startDate: contract.start_date,
+      endDate: contract.end_date,
+      totalAmount: contract.total_amount,
+      dailyRate: contract.daily_rate,
+      status: contractStatusFromDb[contract.status] || 'Actif',
+      paymentMethod: contract.payment_method || 'Carte Bancaire',
+      chauffeurRequested: contract.chauffeur_requested,
+      chauffeurRate: contract.chauffeur_rate,
+      generatedAt: contract.generated_at,
+      customerName: contract.customer_name,
+      customerEmail: contract.customer_email,
+      customerPhone: contract.customer_phone,
+      vehicleLabel: contract.vehicle_label,
+      contractUrl: `${normalizedAppUrl}/#/app/contracts?contract=${contract.id}`,
+    })));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Contracts fetch failed' });
+  }
+});
+
+app.post('/api/contracts', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      return res.status(403).json({ message: 'Owner profile required' });
+    }
+
+    const payload = req.body || {};
+    if (!payload.customerId || !payload.vehicleId || !payload.startDate || !payload.endDate) {
+      return res.status(400).json({ message: 'Contract payload is incomplete' });
+    }
+
+    const [vehicle] = await sql`
+      select id, brand, model
+      from vehicles
+      where id = ${payload.vehicleId}::uuid and owner_id = ${ownerProfile.id}
+      limit 1;
+    `;
+    const [customer] = await sql`
+      select id, full_name, email, coalesce(phone, '') as phone
+      from app_users
+      where id = ${payload.customerId}::uuid
+      limit 1;
+    `;
+
+    if (!vehicle || !customer) {
+      return res.status(404).json({ message: 'Customer or vehicle not found' });
+    }
+
+    const contractNumber = `DJ-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 100000)}`;
+    const [insertedContract] = await sql`
+      insert into contracts (
+        customer_id, vehicle_id, owner_id, contract_number, status,
+        start_date, end_date, daily_rate, total_amount, payment_method,
+        chauffeur_requested, chauffeur_rate, generated_at
+      ) values (
+        ${customer.id},
+        ${vehicle.id},
+        ${ownerProfile.id},
+        ${contractNumber},
+        'ACTIVE'::contract_status,
+        ${payload.startDate},
+        ${payload.endDate},
+        ${Math.max(0, Number(payload.dailyRate) || 0)},
+        ${Math.max(0, Number(payload.totalAmount) || 0)},
+        ${payload.paymentMethod || 'Carte Bancaire'},
+        ${Boolean(payload.chauffeurRequested)},
+        ${Math.max(0, Number(payload.chauffeurRate) || 0)},
+        now()
+      ) returning *;
+    `;
+
+    return res.status(201).json({
+      id: insertedContract.id,
+      contractNumber,
+      customerId: customer.id,
+      vehicleId: vehicle.id,
+      startDate: insertedContract.start_date,
+      endDate: insertedContract.end_date,
+      totalAmount: insertedContract.total_amount,
+      dailyRate: insertedContract.daily_rate,
+      status: contractStatusFromDb[insertedContract.status] || 'Actif',
+      paymentMethod: insertedContract.payment_method || 'Carte Bancaire',
+      chauffeurRequested: insertedContract.chauffeur_requested,
+      chauffeurRate: insertedContract.chauffeur_rate,
+      generatedAt: insertedContract.generated_at,
+      customerName: customer.full_name,
+      customerEmail: customer.email,
+      customerPhone: customer.phone,
+      vehicleLabel: `${vehicle.brand} ${vehicle.model}`,
+      contractUrl: `${normalizedAppUrl}/#/app/contracts?contract=${insertedContract.id}`,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Contract creation failed' });
+  }
+});
+
 app.get('/api/dashboard/overview', async (_req, res) => {
   try {
     const [counts] = await sql`
@@ -533,8 +1806,8 @@ app.get('/api/dashboard/overview', async (_req, res) => {
 
 app.get('/api/dashboard/owner', async (req, res) => {
   try {
-    const userId = req.headers['x-user-id'];
-    if (!userId || Array.isArray(userId)) {
+    const userId = getRequestUserId(req);
+    if (!userId) {
       return res.status(401).json({ message: 'Missing user id' });
     }
 
@@ -548,7 +1821,8 @@ app.get('/api/dashboard/owner', async (req, res) => {
 
     if (ownerRows.length === 0) {
       const parkings = await sql`
-        select p.id, p.name, p.city, p.address, p.capacity_total,
+       select p.id, p.name, p.city, p.address, p.capacity_total,
+         p.latitude, p.longitude, p.location_source, p.location_confirmed_at, p.location_updated_at,
                count(v.id)::int as vehicle_count,
                greatest(p.capacity_total - count(v.id)::int, 0)::int as available_spots
         from parkings p
@@ -556,14 +1830,14 @@ app.get('/api/dashboard/owner', async (req, res) => {
         group by p.id
         order by p.city, p.name;
       `;
-      return res.json({ ownerProfile: null, stats: null, vehicles: [], recentBookings: [], parkings });
+      return res.json({ ownerProfile: null, stats: null, vehicles: [], recentBookings: [], parkings: parkings.map((parking) => mapParkingSummary(parking)), requestInbox: [], reviewFeed: [], notifications: [] });
     }
 
     const owner = ownerRows[0];
 
     const vehicles = await sql`
       select v.id, v.title, v.city, v.price_per_day, v.rating, v.review_count, v.view_count, v.is_available,
-             v.created_at, p.name as parking_name,
+             v.created_at, p.id as parking_id, p.name as parking_name,
              (select image_url from vehicle_images where vehicle_id = v.id order by sort_order asc limit 1) as image_url,
              (
                select max(b.end_date)
@@ -579,7 +1853,7 @@ app.get('/api/dashboard/owner', async (req, res) => {
     `;
 
     const bookings = await sql`
-      select b.id, b.vehicle_id, b.renter_id as user_id, b.start_date, b.end_date, b.total_price, b.status, b.message,
+      select b.id, b.vehicle_id, b.renter_id as user_id, b.start_date, b.end_date, b.total_price, b.status, b.message, b.created_at,
              v.title as vehicle_title, u.full_name as renter_name
       from bookings b
       join vehicles v on v.id = b.vehicle_id
@@ -589,8 +1863,47 @@ app.get('/api/dashboard/owner', async (req, res) => {
       limit 6;
     `;
 
+    const requestInbox = await sql`
+      select
+        vr.id,
+        vr.request_type,
+        vr.status,
+        vr.booking_channel,
+        vr.start_date,
+        vr.end_date,
+        vr.estimated_total,
+        vr.offered_price,
+        vr.pickup_mode,
+        vr.contact_preference,
+        vr.message,
+        vr.created_at,
+        coalesce(vr.customer_details ->> 'fullName', u.full_name) as customer_name,
+        coalesce(vr.customer_details ->> 'email', u.email) as customer_email,
+        coalesce(vr.customer_details ->> 'phone', u.phone, '') as customer_phone,
+        vr.customer_details ->> 'identityNumber' as identity_number,
+        vr.customer_details ->> 'licenseNumber' as license_number,
+        coalesce(v.title, vr.vehicle_title) as vehicle_title
+      from vehicle_requests vr
+      join app_users u on u.id = vr.user_id
+      left join vehicles v on v.id = vr.vehicle_id
+      where vr.owner_id = ${owner.id}
+      order by vr.created_at desc
+      limit 8;
+    `;
+
+    const reviewFeed = await sql`
+      select r.id, r.rating, r.comment, r.created_at, u.full_name as user_name, v.title as vehicle_title
+      from reviews r
+      join app_users u on u.id = r.user_id
+      join vehicles v on v.id = r.vehicle_id
+      where r.owner_id = ${owner.id}
+      order by r.created_at desc
+      limit 6;
+    `;
+
     const parkings = await sql`
       select p.id, p.name, p.city, p.address, p.access_type, p.opening_hours, p.security_features, p.capacity_total,
+             p.latitude, p.longitude, p.location_source, p.location_confirmed_at, p.location_updated_at,
              count(v.id)::int as vehicle_count,
              greatest(p.capacity_total - count(v.id)::int, 0)::int as available_spots
       from parkings p
@@ -605,6 +1918,37 @@ app.get('/api/dashboard/owner', async (req, res) => {
       .reduce((sum, booking) => sum + booking.total_price, 0);
 
     const activeBookings = bookings.filter((booking) => booking.status === 'CONFIRMED' || booking.status === 'PENDING').length;
+
+    const mappedVehicles = vehicles.map((vehicle) => ({
+      id: vehicle.id,
+      title: vehicle.title,
+      city: vehicle.city,
+      pricePerDay: vehicle.price_per_day,
+      rating: Number(vehicle.rating),
+      reviewCount: vehicle.review_count,
+      viewCount: vehicle.view_count,
+      isAvailable: vehicle.is_available,
+      occupiedUntil: vehicle.occupied_until,
+      nextAvailabilityTime: vehicle.occupied_until ? defaultVehicleReleaseTime : null,
+      parkingId: vehicle.parking_id,
+      parkingName: vehicle.parking_name,
+      imageUrl: vehicle.image_url,
+    }));
+
+    const vehiclesByParking = mappedVehicles.reduce((accumulator, vehicle) => {
+      if (!vehicle.parkingId) {
+        return accumulator;
+      }
+
+      if (!accumulator[vehicle.parkingId]) {
+        accumulator[vehicle.parkingId] = [];
+      }
+
+      accumulator[vehicle.parkingId].push(vehicle);
+      return accumulator;
+    }, {});
+
+    const notifications = buildOwnerNotificationFeed({ bookings, requestInbox, reviewFeed });
 
     res.json({
       ownerProfile: {
@@ -626,21 +1970,12 @@ app.get('/api/dashboard/owner', async (req, res) => {
         totalRevenue: completedRevenue,
         averageRating: Number(owner.rating),
       },
-      vehicles: vehicles.map((vehicle) => ({
-        id: vehicle.id,
-        title: vehicle.title,
-        city: vehicle.city,
-        pricePerDay: vehicle.price_per_day,
-        rating: Number(vehicle.rating),
-        reviewCount: vehicle.review_count,
-        viewCount: vehicle.view_count,
-        isAvailable: vehicle.is_available,
-        occupiedUntil: vehicle.occupied_until,
-        parkingName: vehicle.parking_name,
-        imageUrl: vehicle.image_url,
-      })),
+      vehicles: mappedVehicles,
       recentBookings: bookings,
-      parkings,
+      parkings: parkings.map((parking) => mapParkingSummary(parking, vehiclesByParking)),
+      requestInbox,
+      reviewFeed,
+      notifications,
     });
   } catch (error) {
     console.error(error);
@@ -649,5 +1984,5 @@ app.get('/api/dashboard/owner', async (req, res) => {
 });
 
 app.listen(port, () => {
-  console.log(`FleetCommand API listening on http://localhost:${port}`);
+  console.log(`Djambo API listening on http://localhost:${port}`);
 });

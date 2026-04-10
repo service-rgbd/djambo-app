@@ -14,9 +14,11 @@
     "db:seed": "node scripts/seed-database.mjs"
   },
   "dependencies": {
+    "@aws-sdk/client-s3": "^3.1028.0",
     "@google/genai": "^1.35.0",
     "cors": "^2.8.6",
     "express": "^5.2.1",
+    "jspdf": "^4.2.1",
     "lucide-react": "^0.562.0",
     "postgres": "^3.4.9",
     "react": "^19.2.3",
