@@ -716,6 +716,73 @@ const buildCustomerSummaryPayload = ({
   };
 };
 
+const resolveContractCustomerForOwner = async ({ ownerProfile, customerId }) => {
+  const [customer] = await sql`
+    select
+      u.id,
+      u.full_name,
+      u.email,
+      coalesce(u.phone, '') as phone,
+      u.role,
+      u.profile_data,
+      exists (
+        select 1
+        from bookings b
+        where b.owner_id = ${ownerProfile.id}
+          and b.renter_id = u.id
+      ) as has_booking_relation,
+      exists (
+        select 1
+        from vehicle_requests vr
+        where vr.owner_id = ${ownerProfile.id}
+          and vr.user_id = u.id
+      ) as has_request_relation
+    from app_users u
+    where u.id = ${customerId}::uuid
+    limit 1;
+  `;
+
+  if (!customer || customer.role !== 'USER') {
+    return null;
+  }
+
+  const profileData = customer.profile_data && typeof customer.profile_data === 'object'
+    ? customer.profile_data
+    : {};
+  const linkedOwnerId = sanitizeText(profileData.createdByOwnerId);
+  const alreadyOwned = linkedOwnerId === ownerProfile.id;
+  const relatedToOwner = alreadyOwned || customer.has_booking_relation || customer.has_request_relation;
+
+  if (relatedToOwner) {
+    return {
+      id: customer.id,
+      full_name: customer.full_name,
+      email: customer.email,
+      phone: customer.phone,
+    };
+  }
+
+  if (linkedOwnerId && linkedOwnerId !== ownerProfile.id) {
+    return 'linked-elsewhere';
+  }
+
+  const manualCreatedAt = sanitizeText(profileData.manualCreatedAt) || new Date().toISOString();
+  const [linkedCustomer] = await sql`
+    update app_users
+    set profile_data = ${JSON.stringify({
+      ...profileData,
+      createdByOwnerId: ownerProfile.id,
+      manualCreatedAt,
+      source: profileData.source || 'contract-auto-link',
+      clientIntent: profileData.clientIntent || 'RENT',
+    })}::jsonb
+    where id = ${customer.id}::uuid
+    returning id, full_name, email, coalesce(phone, '') as phone;
+  `;
+
+  return linkedCustomer || null;
+};
+
 const sendResendEmail = async ({ to, subject, html, text }) => {
   if (!resendApiKey) {
     if (isProduction) {
@@ -2486,30 +2553,21 @@ app.post('/api/contracts', async (req, res) => {
       where id = ${payload.vehicleId}::uuid and owner_id = ${ownerProfile.id}
       limit 1;
     `;
-    const [customer] = await sql`
-      select id, full_name, email, coalesce(phone, '') as phone
-      from app_users u
-      where id = ${payload.customerId}::uuid
-        and (
-          coalesce(u.profile_data ->> 'createdByOwnerId', '') = ${ownerProfile.id}::text
-          or exists (
-            select 1
-            from bookings b
-            where b.owner_id = ${ownerProfile.id}
-              and b.renter_id = u.id
-          )
-          or exists (
-            select 1
-            from vehicle_requests vr
-            where vr.owner_id = ${ownerProfile.id}
-              and vr.user_id = u.id
-          )
-        )
-      limit 1;
-    `;
+    const customer = await resolveContractCustomerForOwner({
+      ownerProfile,
+      customerId: payload.customerId,
+    });
 
-    if (!vehicle || !customer) {
-      return res.status(404).json({ message: 'Customer or vehicle not found' });
+    if (!vehicle) {
+      return res.status(404).json({ message: 'Vehicule introuvable dans votre flotte.' });
+    }
+
+    if (customer === 'linked-elsewhere') {
+      return res.status(409).json({ message: 'Ce client est deja rattache a un autre espace proprietaire.' });
+    }
+
+    if (!customer) {
+      return res.status(404).json({ message: 'Client introuvable ou non autorise pour ce contrat.' });
     }
 
     const contractNumber = `DJ-${new Date().toISOString().slice(0, 10).replace(/-/g, '')}-${Math.floor(Math.random() * 100000)}`;

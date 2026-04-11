@@ -218,24 +218,35 @@ export const ContractManager: React.FC = () => {
     const document = new jsPDF({ unit: 'mm', format: 'a4' });
     const margin = 16;
     const pageWidth = document.internal.pageSize.getWidth();
+    const pageHeight = document.internal.pageSize.getHeight();
     const usableWidth = pageWidth - margin * 2;
+    const rightColumnX = margin + usableWidth * 0.56;
     let y = 18;
+    const contractIssueDate = new Date(contract.generatedAt || new Date().toISOString()).toLocaleDateString('fr-FR');
+    const rentalDays = Math.max(1, Math.ceil((new Date(contract.endDate).getTime() - new Date(contract.startDate).getTime()) / 86400000));
+    const contractDailyRate = contract.dailyRate || resolvedVehicle.pricePerDay || 0;
+    const contractChauffeurRate = contract.chauffeurRequested ? (contract.chauffeurRate || 0) : 0;
+    const contractChauffeurTotal = contract.chauffeurRequested ? contractChauffeurRate * rentalDays : 0;
+    const ownerName = settings.businessName || user?.name || 'Djambo Mobility';
+    const ownerEmail = settings.publicEmail || user?.email || 'support@djambo.app';
+    const ownerPhone = settings.supportPhone || 'Non renseigne';
+    const paymentReference = paymentLabel[contract.paymentMethod || 'Carte Bancaire'];
 
     const ensureSpace = (requiredHeight = 14) => {
-      if (y + requiredHeight <= 280) {
+      if (y + requiredHeight <= pageHeight - 20) {
         return;
       }
       document.addPage();
       y = 18;
     };
 
-    const addParagraph = (text: string, fontSize = 10, color = '#475569') => {
+    const addParagraph = (text: string, fontSize = 10, color = '#475569', indent = margin) => {
       document.setFont('helvetica', 'normal');
       document.setFontSize(fontSize);
       document.setTextColor(color);
-      const lines = document.splitTextToSize(text, usableWidth);
+      const lines = document.splitTextToSize(text, usableWidth - (indent - margin));
       ensureSpace(lines.length * 5 + 4);
-      document.text(lines, margin, y);
+      document.text(lines, indent, y);
       y += lines.length * 5 + 2;
     };
 
@@ -251,74 +262,134 @@ export const ContractManager: React.FC = () => {
       y += 6;
     };
 
-    const addKeyValue = (label: string, value: string) => {
+    const addKeyValue = (label: string, value: string, x = margin, width = usableWidth) => {
       ensureSpace(6);
       document.setFont('helvetica', 'bold');
       document.setFontSize(10);
       document.setTextColor('#0f172a');
-      document.text(`${label}:`, margin, y);
+      document.text(`${label}:`, x, y);
       document.setFont('helvetica', 'normal');
       document.setTextColor('#475569');
-      document.text(value, margin + 40, y);
-      y += 6;
+      const valueLines = document.splitTextToSize(value, Math.max(24, width - 42));
+      document.text(valueLines, x + 40, y);
+      y += valueLines.length > 1 ? (valueLines.length * 5) : 6;
+    };
+
+    const addMetricCard = (title: string, value: string, x: number, top: number, width: number) => {
+      document.setFillColor('#f8fafc');
+      document.roundedRect(x, top, width, 18, 3, 3, 'F');
+      document.setFont('helvetica', 'bold');
+      document.setFontSize(8);
+      document.setTextColor('#64748b');
+      document.text(title.toUpperCase(), x + 4, top + 6);
+      document.setFontSize(12);
+      document.setTextColor('#0f172a');
+      document.text(value, x + 4, top + 13);
+    };
+
+    const addFooter = () => {
+      const pageCount = document.getNumberOfPages();
+      for (let page = 1; page <= pageCount; page += 1) {
+        document.setPage(page);
+        document.setDrawColor('#e2e8f0');
+        document.line(margin, pageHeight - 16, pageWidth - margin, pageHeight - 16);
+        document.setFont('helvetica', 'normal');
+        document.setFontSize(8);
+        document.setTextColor('#64748b');
+        document.text(`${ownerName}  •  ${settings.city || 'Dakar'}  •  ${ownerEmail}`, margin, pageHeight - 10);
+        document.text(`Contrat ${contract.contractNumber || contract.id}  •  Page ${page}/${pageCount}`, pageWidth - margin, pageHeight - 10, { align: 'right' });
+      }
     };
 
     document.setFillColor('#0f172a');
-    document.rect(margin, y, usableWidth, 26, 'F');
+    document.rect(0, 0, pageWidth, 42, 'F');
     document.setFont('helvetica', 'bold');
     document.setTextColor('#ffffff');
-    document.setFontSize(18);
-    document.text('Contrat de location Djambo', margin + 6, y + 10);
+    document.setFontSize(20);
+    document.text(ownerName, margin, 18);
     document.setFontSize(10);
     document.setTextColor('#cbd5e1');
-    document.text(`Reference ${contract.contractNumber || contract.id}`, margin + 6, y + 17);
-    document.text(`Edite le ${new Date(contract.generatedAt || new Date().toISOString()).toLocaleDateString('fr-FR')}`, margin + 6, y + 22);
-    y += 34;
+    document.text('Document contractuel de location', margin, 25);
+    document.text(`${settings.city || 'Dakar'} • ${ownerEmail}${ownerPhone !== 'Non renseigne' ? ` • ${ownerPhone}` : ''}`, margin, 31);
 
-    addSectionTitle('Parties contractantes');
-    addKeyValue('Loueur', settings.businessName || user?.name || 'Djambo Mobility');
-    addKeyValue('Email loueur', settings.publicEmail || user?.email || 'support@djambo.app');
-    addKeyValue('Telephone loueur', settings.supportPhone || 'Non renseigne');
-    addKeyValue('Client', resolvedCustomer.fullName || contract.customerName || 'Client');
-    addKeyValue('Email client', resolvedCustomer.email || contract.customerEmail || 'Non renseigne');
-    addKeyValue('Telephone client', resolvedCustomer.phone || contract.customerPhone || 'Non renseigne');
+    document.setFillColor('#ffffff');
+    document.roundedRect(pageWidth - margin - 62, 10, 62, 24, 4, 4, 'F');
+    document.setFont('helvetica', 'bold');
+    document.setFontSize(9);
+    document.setTextColor('#475569');
+    document.text('REFERENCE DOSSIER', pageWidth - margin - 58, 18);
+    document.setFontSize(13);
+    document.setTextColor('#0f172a');
+    document.text(contract.contractNumber || contract.id, pageWidth - margin - 58, 25);
+    document.setFont('helvetica', 'normal');
+    document.setFontSize(9);
+    document.setTextColor('#64748b');
+    document.text(`Emission ${contractIssueDate}`, pageWidth - margin - 58, 31);
 
-    addSectionTitle('Vehicule et periode');
+    y = 52;
+    addMetricCard('Montant total', `${contract.totalAmount.toLocaleString()} FCFA`, margin, y, usableWidth / 3 - 4);
+    addMetricCard('Periode', `${rentalDays} jour(s)`, margin + usableWidth / 3 + 2, y, usableWidth / 3 - 4);
+    addMetricCard('Paiement', paymentReference, margin + (usableWidth / 3) * 2 + 4, y, usableWidth / 3 - 4);
+    y += 28;
+
+    addSectionTitle('1. Parties contractantes');
+    const partiesTop = y;
+    document.setFillColor('#f8fafc');
+    document.roundedRect(margin, partiesTop, usableWidth * 0.48, 34, 3, 3, 'F');
+    document.roundedRect(rightColumnX, partiesTop, usableWidth * 0.44, 34, 3, 3, 'F');
+    document.setFont('helvetica', 'bold');
+    document.setFontSize(10);
+    document.setTextColor('#0f172a');
+    document.text('Loueur', margin + 4, partiesTop + 7);
+    document.text('Client', rightColumnX + 4, partiesTop + 7);
+    document.setFont('helvetica', 'normal');
+    document.setFontSize(9);
+    document.setTextColor('#475569');
+    document.text(document.splitTextToSize(`${ownerName}\n${ownerEmail}\n${ownerPhone}`, usableWidth * 0.48 - 8), margin + 4, partiesTop + 14);
+    document.text(document.splitTextToSize(`${resolvedCustomer.fullName || contract.customerName || 'Client'}\n${resolvedCustomer.email || contract.customerEmail || 'Non renseigne'}\n${resolvedCustomer.phone || contract.customerPhone || 'Non renseigne'}`, usableWidth * 0.44 - 8), rightColumnX + 4, partiesTop + 14);
+    y += 42;
+
+    addSectionTitle('2. Objet du contrat');
+    addParagraph(`Le present document formalise la mise a disposition du vehicule ${contract.vehicleLabel || `${resolvedVehicle.brand} ${resolvedVehicle.model}`} au profit de ${resolvedCustomer.fullName} pour la periode convenue. Le niveau de service Djambo comprend la preparation du vehicule, la verification documentaire et le suivi client pendant toute la duree de location.`);
+
+    addSectionTitle('3. Vehicule et execution');
     addKeyValue('Vehicule', contract.vehicleLabel || `${resolvedVehicle.brand} ${resolvedVehicle.model}`);
     addKeyValue('Categorie', resolvedVehicle.category);
     addKeyValue('Ville', resolvedVehicle.city);
     addKeyValue('Point de retrait', resolvedVehicle.location);
-    addKeyValue('Date de debut', new Date(contract.startDate).toLocaleDateString('fr-FR'));
-    addKeyValue('Date de fin', new Date(contract.endDate).toLocaleDateString('fr-FR'));
-    addKeyValue('Disponibilite contractuelle', 'Mise a disposition a 10:00, restitution avant 18:00.');
+    addKeyValue('Debut de mise a disposition', new Date(contract.startDate).toLocaleDateString('fr-FR'));
+    addKeyValue('Date de restitution', new Date(contract.endDate).toLocaleDateString('fr-FR'));
+    addKeyValue('Cadre horaire', 'Mise a disposition a 10:00, restitution avant 18:00 sauf accord ecrit.');
 
-    addSectionTitle('Conditions financieres');
-    addKeyValue('Tarif journalier', `${(contract.dailyRate || dailyRate).toLocaleString()} FCFA`);
-    addKeyValue('Mode de paiement', paymentLabel[contract.paymentMethod || 'Carte Bancaire']);
-    addKeyValue('Option chauffeur', contract.chauffeurRequested ? `Oui, ${(contract.chauffeurRate || 0).toLocaleString()} FCFA / jour` : 'Non');
-    addKeyValue('Montant total', `${contract.totalAmount.toLocaleString()} FCFA`);
+    addSectionTitle('4. Conditions financieres');
+    addKeyValue('Tarif journalier', `${contractDailyRate.toLocaleString()} FCFA`);
+    addKeyValue('Duree facturable', `${rentalDays} jour(s)`);
+    addKeyValue('Prestation chauffeur', contract.chauffeurRequested ? `Oui, ${contractChauffeurRate.toLocaleString()} FCFA / jour` : 'Non incluse');
+    if (contract.chauffeurRequested) {
+      addKeyValue('Total chauffeur', `${contractChauffeurTotal.toLocaleString()} FCFA`);
+    }
+    addKeyValue('Mode de paiement', paymentReference);
+    addKeyValue('Montant total contractuel', `${contract.totalAmount.toLocaleString()} FCFA`);
 
-    addSectionTitle('Clauses principales');
-    addParagraph('1. Le vehicule est remis dans un etat conforme au descriptif et doit etre restitue avec un niveau de carburant equivalent.');
-    addParagraph('2. Toute prolongation doit etre confirmee avant l echeance contractuelle afin de garantir la disponibilite et la couverture du dossier.');
-    addParagraph('3. Le client reste responsable des contraventions, degradations non liees a l usure normale et frais engages pendant la periode de possession.');
-    addParagraph('4. Les reservations anticipees sont maintenues sous reserve du reglement et des verifications d usage prevues par le loueur.');
-    addParagraph('5. En cas d indisponibilite exceptionnelle, une solution equivalente ou un report valide d un commun accord sera propose.');
+    addSectionTitle('5. Corps du contrat');
+    addParagraph('Le vehicule est remis propre, avec ses documents de bord et un niveau de carburant equivalent a celui qui devra etre constate a la restitution. Toute anomalie visible doit etre signalee au moment de la remise.');
+    addParagraph('Le client s engage a utiliser le vehicule conformement a sa destination, a respecter les lois de circulation en vigueur et a informer sans delai Djambo de tout incident, immobilisation ou retard affectant le service.');
+    addParagraph('Toute prolongation de location doit faire l objet d une validation prealable ecrite. A defaut, la disponibilite du vehicule, la couverture et l organisation logistique ne peuvent etre garanties.');
+    addParagraph('Le client demeure responsable des contraventions, degradations hors usure normale, pertes d accessoires ou frais engages durant la periode contractuelle. Les frais additionnels justifies pourront faire l objet d une regularisation complementaire.');
 
-    addSectionTitle('Observations');
-    addParagraph(`Statut initial du dossier: ${contract.status}.`);
-    addParagraph(`Reference de consultation client: ${resolvedCustomer.preferredVehicle || 'Aucune preference enregistree'}.`);
-    addParagraph('Application ouverte a tous les utilisateurs, sans preference geographique imposee.');
-
-    ensureSpace(24);
+    addSectionTitle('6. Validation et signatures');
+    addParagraph(`Le dossier est emis en statut ${contract.status}. La reference contractuelle ${contract.contractNumber || contract.id} fait foi pour toute correspondance, verification interne ou suivi administratif.`);
+    ensureSpace(28);
     document.setDrawColor('#cbd5e1');
     document.line(margin, y + 12, margin + 70, y + 12);
     document.line(pageWidth - margin - 70, y + 12, pageWidth - margin, y + 12);
     document.setFont('helvetica', 'normal');
     document.setFontSize(10);
     document.setTextColor('#64748b');
-    document.text('Signature loueur', margin, y + 18);
-    document.text('Signature client', pageWidth - margin - 70, y + 18);
+    document.text('Signature du loueur', margin, y + 18);
+    document.text('Signature du client', pageWidth - margin - 70, y + 18);
+
+    addFooter();
 
     document.save(`contrat-${contract.contractNumber || contract.id}.pdf`);
   };
@@ -335,37 +406,49 @@ export const ContractManager: React.FC = () => {
 
   const handleGenerateContract = async () => {
     if (!selectedCustomer || !selectedVehicle || !startDate || !endDate) {
+      setError('Selectionnez un client, un vehicule et une periode complete.');
+      return;
+    }
+
+    if (new Date(endDate).getTime() < new Date(startDate).getTime()) {
+      setError('La date de fin doit etre posterieure ou egale a la date de debut.');
       return;
     }
 
     try {
       setProcessing(true);
-      let resolvedCustomerId = selectedCustomer;
-      let resolvedCustomer = customers.find((customer) => customer.id === selectedCustomer) || null;
+      const resolvedCustomer = customers.find((customer) => customer.id === selectedCustomer)
+        || (() => {
+          const candidate = registeredCandidates.find((entry) => entry.id === selectedCustomer);
+          if (!candidate) {
+            return null;
+          }
+
+          const nameParts = candidate.fullName.split(/\s+/).filter(Boolean);
+          return {
+            id: candidate.id,
+            firstName: nameParts[0] || 'Client',
+            lastName: nameParts.slice(1).join(' ') || 'Djambo',
+            fullName: candidate.fullName,
+            email: candidate.email,
+            phone: candidate.phone,
+            status: 'Actif' as const,
+            totalBookings: 0,
+            totalRequests: 0,
+            totalSpent: 0,
+            lastActivityAt: null,
+            preferredVehicle: null,
+            interestType: 'RENT' as const,
+          };
+        })();
 
       if (!resolvedCustomer) {
-        const candidate = registeredCandidates.find((entry) => entry.id === selectedCustomer);
-        if (!candidate) {
-          setError('Le client choisi n est pas disponible pour le contrat.');
-          return;
-        }
-
-        const attachedCustomer = await api.createCustomer({
-          fullName: candidate.fullName,
-          email: candidate.email,
-          phone: candidate.phone,
-          interestType: 'RENT',
-        });
-
-        resolvedCustomerId = attachedCustomer.id;
-        resolvedCustomer = attachedCustomer;
-        setSelectedCustomer(attachedCustomer.id);
-        setCustomers((current) => [attachedCustomer, ...current.filter((customer) => customer.id !== attachedCustomer.id)]);
-        setRegisteredCandidates((current) => current.filter((entry) => entry.id !== candidate.id));
+        setError('Le client choisi n est pas disponible pour le contrat.');
+        return;
       }
 
       const newContract = await api.createContract({
-        customerId: resolvedCustomerId,
+        customerId: selectedCustomer,
         vehicleId: selectedVehicle,
         startDate,
         endDate,
@@ -380,13 +463,20 @@ export const ContractManager: React.FC = () => {
         { ...newContract, contractUrl: newContract.contractUrl || buildContractUrl(newContract.id) },
         ...current,
       ]);
+      const [customerResponse, registeredResponse] = await Promise.all([
+        api.getCustomers(),
+        api.searchRegisteredCustomers(customerSearchTerm),
+      ]);
+      setCustomers(customerResponse);
+      setRegisteredCandidates(registeredResponse);
       setPaymentSuccess(true);
       downloadContractPdf(newContract, resolvedCustomer || undefined, selectedVehicleObject);
       resetForm();
       setTimeout(() => setPaymentSuccess(false), 2500);
       setError('');
-    } catch {
-      setError('Creation du contrat impossible pour le moment.');
+    } catch (caughtError) {
+      const message = caughtError instanceof Error ? caughtError.message : 'Creation du contrat impossible pour le moment.';
+      setError(message || 'Creation du contrat impossible pour le moment.');
     } finally {
       setProcessing(false);
     }
