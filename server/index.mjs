@@ -596,7 +596,8 @@ const getCustomerSummariesByUserId = async (userId) => {
         b.total_price::int as amount,
         b.created_at as activity_at,
         v.title as vehicle_title,
-        'BOOKING'::text as source
+        'BOOKING'::text as source,
+        null::text as manual_intent
       from bookings b
       join app_users u on u.id = b.renter_id
       join vehicles v on v.id = b.vehicle_id
@@ -612,11 +613,28 @@ const getCustomerSummariesByUserId = async (userId) => {
         coalesce(vr.estimated_total, vr.offered_price, 0)::int as amount,
         vr.created_at as activity_at,
         coalesce(v.title, vr.vehicle_title) as vehicle_title,
-        'REQUEST'::text as source
+        'REQUEST'::text as source,
+        null::text as manual_intent
       from vehicle_requests vr
       join app_users u on u.id = vr.user_id
       left join vehicles v on v.id = vr.vehicle_id
       where vr.owner_id = ${ownerId}
+
+      union all
+
+      select
+        u.id,
+        u.full_name,
+        u.email,
+        coalesce(u.phone, '') as phone,
+        0::int as amount,
+        coalesce(nullif(u.profile_data ->> 'manualCreatedAt', '')::timestamptz, now()) as activity_at,
+        null::text as vehicle_title,
+        'MANUAL'::text as source,
+        upper(nullif(u.profile_data ->> 'clientIntent', ''))::text as manual_intent
+      from app_users u
+      where u.role = 'USER'
+        and coalesce(u.profile_data ->> 'createdByOwnerId', '') = ${ownerId}::text
     )
     select
       id,
@@ -627,7 +645,8 @@ const getCustomerSummariesByUserId = async (userId) => {
       count(*) filter (where source = 'REQUEST')::int as total_requests,
       coalesce(sum(amount) filter (where source = 'BOOKING'), 0)::int as total_spent,
       max(activity_at) as last_activity_at,
-      (array_remove(array_agg(vehicle_title order by activity_at desc), null))[1] as preferred_vehicle
+      (array_remove(array_agg(vehicle_title order by activity_at desc), null))[1] as preferred_vehicle,
+      (array_remove(array_agg(manual_intent order by activity_at desc), null))[1] as interest_type
     from customer_activity
     group by id, full_name, email, phone
     order by last_activity_at desc nulls last;
@@ -655,6 +674,7 @@ const getCustomerSummariesByUserId = async (userId) => {
       totalSpent: customer.total_spent,
       lastActivityAt: customer.last_activity_at,
       preferredVehicle: customer.preferred_vehicle,
+      interestType: customer.interest_type === 'BUY' ? 'BUY' : customer.interest_type === 'RENT' ? 'RENT' : null,
     };
   });
 };
@@ -1143,6 +1163,86 @@ app.get('/api/customers', async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Customers fetch failed' });
+  }
+});
+
+app.post('/api/customers', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      return res.status(403).json({ message: 'Owner profile required' });
+    }
+
+    const fullName = sanitizeText(req.body?.fullName);
+    const email = sanitizeText(req.body?.email).toLowerCase();
+    const phone = sanitizeText(req.body?.phone);
+    const interestType = req.body?.interestType === 'BUY' ? 'BUY' : 'RENT';
+
+    if (!fullName || !email || !phone) {
+      return res.status(400).json({ message: 'Nom, email et telephone sont requis.' });
+    }
+
+    const existingUsers = await sql`
+      select id, full_name, email, coalesce(phone, '') as phone
+      from app_users
+      where email = ${email}
+      limit 1;
+    `;
+
+    if (existingUsers.length > 0) {
+      return res.status(409).json({ message: 'Un client avec cet email existe deja.' });
+    }
+
+    const createdAt = new Date().toISOString();
+    const generatedPassword = crypto.randomBytes(18).toString('hex');
+
+    const insertedUsers = await sql`
+      insert into app_users (full_name, email, password_hash, role, email_verified, phone, profile_data)
+      values (
+        ${fullName},
+        ${email},
+        ${hashPassword(generatedPassword)},
+        ${'USER'}::user_role,
+        true,
+        ${phone},
+        ${JSON.stringify({
+          createdByOwnerId: ownerProfile.id,
+          manualCreatedAt: createdAt,
+          clientIntent: interestType,
+          source: 'dashboard-manual-customer',
+        })}::jsonb
+      )
+      returning id, full_name, email, coalesce(phone, '') as phone;
+    `;
+
+    const createdUser = insertedUsers[0];
+    const nameParts = String(createdUser.full_name || '').trim().split(/\s+/).filter(Boolean);
+    const firstName = nameParts[0] || 'Client';
+    const lastName = nameParts.slice(1).join(' ') || 'Djambo';
+
+    return res.status(201).json({
+      id: createdUser.id,
+      firstName,
+      lastName,
+      fullName: createdUser.full_name,
+      email: createdUser.email,
+      phone: createdUser.phone,
+      status: 'Actif',
+      totalBookings: 0,
+      totalRequests: 0,
+      totalSpent: 0,
+      lastActivityAt: createdAt,
+      preferredVehicle: null,
+      interestType,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Customer creation failed' });
   }
 });
 
@@ -2272,8 +2372,23 @@ app.post('/api/contracts', async (req, res) => {
     `;
     const [customer] = await sql`
       select id, full_name, email, coalesce(phone, '') as phone
-      from app_users
+      from app_users u
       where id = ${payload.customerId}::uuid
+        and (
+          coalesce(u.profile_data ->> 'createdByOwnerId', '') = ${ownerProfile.id}::text
+          or exists (
+            select 1
+            from bookings b
+            where b.owner_id = ${ownerProfile.id}
+              and b.renter_id = u.id
+          )
+          or exists (
+            select 1
+            from vehicle_requests vr
+            where vr.owner_id = ${ownerProfile.id}
+              and vr.user_id = u.id
+          )
+        )
       limit 1;
     `;
 
