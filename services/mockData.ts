@@ -2,12 +2,42 @@ import {
   Vehicle, VehicleStatus, FuelType, MaintenanceRecord, RevenueData, FleetStats, Customer, Contract,
   OwnerProfile, MarketplaceVehicle, VehicleCategory, Review, MarketplaceBooking, BookingStatus
 } from '../types';
+import {
+  LEGACY_OWNER_ID_ALIASES,
+  LEGACY_USER_ID_ALIASES,
+  LEGACY_VEHICLE_ID_ALIASES,
+} from '../shared/marketplaceIds.js';
+
+const ownerIdAliases = LEGACY_OWNER_ID_ALIASES as Record<string, string>;
+const userIdAliases = LEGACY_USER_ID_ALIASES as Record<string, string>;
+const vehicleIdAliases = LEGACY_VEHICLE_ID_ALIASES as Record<string, string>;
+
+const TOYOTA_LAND_CRUISER_GX_2022_SRC = new URL('../Toyota Land Cruiser GX 2022.jpeg', import.meta.url).href;
+const TOYOTA_LAND_CRUISER_GX_2022_ALT_SRC = new URL('../Toyota Land Cruiser GX 2022 2.webp', import.meta.url).href;
+const MERCEDES_BENZ_C_300_AMG_LINE_SRC = new URL('../Mercedes-Benz C 300 AMG Line .jpeg', import.meta.url).href;
+const MERCEDES_BENZ_C_300_AMG_LINE_ALT_SRC = new URL('../Mercedes-Benz C 300 AMG Line  22.jpeg', import.meta.url).href;
+const RANGE_ROVER_SPORT_SE_2023_SRC = new URL('../Range Rover Sport SE 2023 .jpeg', import.meta.url).href;
+const RANGE_ROVER_SPORT_SE_2023_ALT_SRC = new URL('../WhatsApp Image 2023-08-16 at 13.49.13 (2).jpeg', import.meta.url).href;
+const RENAULT_DUSTER_PRESTIGE_4X4_SRC = new URL('../Renauld duster Prestige.webp', import.meta.url).href;
+const RENAULT_DUSTER_PRESTIGE_4X4_ALT_SRC = new URL('../Renauld duster Prestige2.webp', import.meta.url).href;
+const RENAULT_DUSTER_PRESTIGE_4X4_ALT_JPEG_SRC = new URL('../Renauld duster Prestige 2.jpeg', import.meta.url).href;
+const RENAULT_DUSTER_PRESTIGE_4X4_ALT_JPEG_2_SRC = new URL('../Renauld duster Prestige2.jpeg', import.meta.url).href;
+const VOLKSWAGEN_POLO_CONFORTLINE_SRC = new URL('../Volkswagen Polo Confortline.jpeg', import.meta.url).href;
+const VOLKSWAGEN_POLO_CONFORTLINE_ALT_SRC = new URL('../wolvageng.png', import.meta.url).href;
+const TOYOTA_PRADO_TXL_2021_ALT_SRC = new URL('../Toyota Prado TXL 2021.webp', import.meta.url).href;
+const TOYOTA_PRADO_TXL_2021_SRC = new URL('../Toyota Prado TXL 2021 22.jpeg', import.meta.url).href;
+const TOYOTA_HILUX_DOUBLE_CAB_4X4_SRC = new URL('../Toyotohiluxdoublecab.jpeg', import.meta.url).href;
+const TOYOTA_HILUX_DOUBLE_CAB_4X4_ALT_SRC = new URL('../Toyotahilydouble2.jpeg', import.meta.url).href;
+const MERCEDES_BENZ_VITO_TOURER_9_PLACES_SRC = new URL('../Mercedes-Benz Vito Tourer 9 places.jpeg', import.meta.url).href;
+const MERCEDES_BENZ_VITO_TOURER_9_PLACES_ALT_SRC = new URL('../Mercedes-Benz Vito Tourer 9 places 2.avif', import.meta.url).href;
+const PORSCHE_CAYENNE_2022_SRC = new URL('../Porsche Cayenne 2022 .jpeg', import.meta.url).href;
+const PORSCHE_CAYENNE_2022_ALT_SRC = new URL('../Porsche Cayenne 2022 22.jpeg', import.meta.url).href;
 
 // ============================================================
 // MARKETPLACE DATA
 // ============================================================
 
-export const ownerProfiles: OwnerProfile[] = [
+const ownerProfilesSource: OwnerProfile[] = [
   {
     id: 'op1', userId: 'u10', type: 'PARC_AUTO',
     displayName: 'AutoLoc Dakar',
@@ -50,6 +80,17 @@ export const ownerProfiles: OwnerProfile[] = [
   },
 ];
 
+export const ownerProfiles: OwnerProfile[] = ownerProfilesSource.map((profile) => ({
+  ...profile,
+  id: ownerIdAliases[profile.id] || profile.id,
+  userId: userIdAliases[profile.userId] || profile.userId,
+}));
+
+const ownerProfilesByLegacyId = ownerProfilesSource.reduce<Record<string, OwnerProfile>>((accumulator, profile, index) => {
+  accumulator[profile.id] = ownerProfiles[index];
+  return accumulator;
+}, {});
+
 // Real Unsplash car photos indexed by vehicle seed
 const UNSPLASH_CAR_IDS: Record<string, [string, string, string]> = {
   'land-cruiser':    ['photo-1533591380348-14193f1de18f', 'photo-1519641471654-76ce0107ad1b', 'photo-1476357471311-43c0db9fb2b4'],
@@ -66,16 +107,38 @@ const UNSPLASH_CAR_IDS: Record<string, [string, string, string]> = {
   'porsche-cayenne': ['photo-1544636331-e26879cd4d9b', 'photo-1503376780353-7e6692767b70', 'photo-1552519507-da3b142c6e3d'],
 };
 
+const LOCAL_MARKETPLACE_VEHICLE_IMAGES: Record<string, string[]> = {
+  'Toyota Land Cruiser GX 2022': [TOYOTA_LAND_CRUISER_GX_2022_SRC, TOYOTA_LAND_CRUISER_GX_2022_ALT_SRC],
+  'Mercedes-Benz C 300 AMG Line': [MERCEDES_BENZ_C_300_AMG_LINE_SRC, MERCEDES_BENZ_C_300_AMG_LINE_ALT_SRC],
+  'Range Rover Sport SE 2023': [RANGE_ROVER_SPORT_SE_2023_SRC, RANGE_ROVER_SPORT_SE_2023_ALT_SRC],
+  'Volkswagen Polo Confortline': [VOLKSWAGEN_POLO_CONFORTLINE_SRC, VOLKSWAGEN_POLO_CONFORTLINE_ALT_SRC],
+  'Renault Duster Prestige 4x4': [
+    RENAULT_DUSTER_PRESTIGE_4X4_SRC,
+    RENAULT_DUSTER_PRESTIGE_4X4_ALT_SRC,
+    RENAULT_DUSTER_PRESTIGE_4X4_ALT_JPEG_SRC,
+    RENAULT_DUSTER_PRESTIGE_4X4_ALT_JPEG_2_SRC,
+  ],
+  'Toyota Hilux Double Cab 4x4': [TOYOTA_HILUX_DOUBLE_CAB_4X4_SRC, TOYOTA_HILUX_DOUBLE_CAB_4X4_ALT_SRC],
+  'Mercedes-Benz Vito Tourer 9 places': [MERCEDES_BENZ_VITO_TOURER_9_PLACES_SRC, MERCEDES_BENZ_VITO_TOURER_9_PLACES_ALT_SRC],
+  'Toyota Prado TXL 2021': [TOYOTA_PRADO_TXL_2021_SRC, TOYOTA_PRADO_TXL_2021_ALT_SRC],
+  'Porsche Cayenne 2022': [PORSCHE_CAYENNE_2022_SRC, PORSCHE_CAYENNE_2022_ALT_SRC],
+};
+
 const makeImages = (seed: string, title = '', count = 3) => {
   const ids = UNSPLASH_CAR_IDS[seed] || [];
-  return ids.slice(0, count).map((id, i) => ({
+  const localUrls = LOCAL_MARKETPLACE_VEHICLE_IMAGES[title] || [];
+  const resolvedUrls = localUrls.length > 0
+    ? localUrls.slice(0, count)
+    : ids.map((id) => `https://images.unsplash.com/${id}?w=900&q=80&auto=format&fit=crop`).slice(0, count);
+
+  return resolvedUrls.map((url, i) => ({
     id: `${seed}-img${i + 1}`,
-    url: `https://images.unsplash.com/${id}?w=900&q=80&auto=format&fit=crop`,
+    url,
     alt: title ? `${title} - Photo ${i + 1}` : `Photo ${i + 1}`,
   }));
 };
 
-export const marketplaceVehicles: MarketplaceVehicle[] = [
+const marketplaceVehiclesSource: MarketplaceVehicle[] = [
   {
     id: 'mv1', ownerId: 'op1', ownerProfile: ownerProfiles[0],
     title: 'Toyota Land Cruiser GX 2022',
@@ -252,12 +315,19 @@ export const marketplaceVehicles: MarketplaceVehicle[] = [
     description: 'L\'icône de Porsche en SUV. Puissance 440ch, 0-100 en 5.0s. Intérieur alcantara, son Bose 14 haut-parleurs. Pour une expérience de conduite unique.',
     features: ['440 ch', 'PDCC Sport', 'Panoramique', 'Bose 14hp', 'Sièges sport', 'PSCB', 'Alcantara'],
     location: 'Les Almadies, Dakar', city: 'Dakar',
-    images: makeImages('porsche-cayenne', 'Porsche Cayenne S 2022'),
+    images: makeImages('porsche-cayenne', 'Porsche Cayenne 2022'),
     rating: 4.9, reviewCount: 7, viewCount: 743, isFeatured: true, isAvailable: true,
     createdAt: '2024-02-15', mileage: 5000, color: 'Blanc Craie',
     conditions: 'Caution 1 000 000 FCFA. Permis B minimum 3 ans exigé.',
   },
 ];
+
+export const marketplaceVehicles: MarketplaceVehicle[] = marketplaceVehiclesSource.map((vehicle) => ({
+  ...vehicle,
+  id: vehicleIdAliases[vehicle.id] || vehicle.id,
+  ownerId: ownerIdAliases[vehicle.ownerId] || vehicle.ownerId,
+  ownerProfile: ownerProfilesByLegacyId[vehicle.ownerId] || vehicle.ownerProfile,
+}));
 
 export const reviews: Review[] = [
   { id: 'r1', userId: 'u20', userName: 'Fatou Diaw', userInitials: 'FD', vehicleId: 'mv1', ownerId: 'op1', rating: 5, comment: 'Véhicule impeccable, propre et bien entretenu. AutoLoc Dakar est très professionnel, je recommande vivement !', createdAt: '2024-03-10' },
@@ -272,13 +342,46 @@ export const reviews: Review[] = [
   { id: 'r10', userId: 'u29', userName: 'Cheikh Mbaye', userInitials: 'CM', vehicleId: 'mv10', ownerId: 'op1', rating: 5, comment: 'Prado TXL pour notre safari. Impeccable sur tous les terrains. AutoLoc reste ma référence à Dakar.', createdAt: '2024-03-08' },
   { id: 'r11', userId: 'u30', userName: 'Bintou Koné', userInitials: 'BK', vehicleId: 'mv8', ownerId: 'op3', rating: 4, comment: 'Duster pratique et fiable. Process de location simple et rapide avec Premium Cars CI.', createdAt: '2024-02-18' },
   { id: 'r12', userId: 'u31', userName: 'Oumar Ndiaye', userInitials: 'ON', vehicleId: 'mv9', ownerId: 'op3', rating: 5, comment: 'Vito parfait pour le transfert mariage de 8 personnes. Très propre, chauffeur en costume. Bravo !', createdAt: '2024-03-02' },
-];
+].map((review) => ({
+  ...review,
+  vehicleId: vehicleIdAliases[review.vehicleId] || review.vehicleId,
+  ownerId: ownerIdAliases[review.ownerId] || review.ownerId,
+}));
 
 export const marketplaceBookings: MarketplaceBooking[] = [
   { id: 'b1', vehicleId: 'mv1', userId: 'u20', startDate: '2024-04-01', endDate: '2024-04-05', totalPrice: 225000, status: BookingStatus.CONFIRMED, message: 'Voyage en famille', createdAt: '2024-03-20' },
   { id: 'b2', vehicleId: 'mv2', userId: 'u22', startDate: '2024-04-10', endDate: '2024-04-11', totalPrice: 55000, status: BookingStatus.PENDING, message: 'Événement d\'entreprise', createdAt: '2024-03-25' },
   { id: 'b3', vehicleId: 'mv6', userId: 'u27', startDate: '2024-04-15', endDate: '2024-04-15', totalPrice: 110000, status: BookingStatus.CONFIRMED, message: 'Réunion board', createdAt: '2024-03-28' },
-];
+].map((booking) => ({
+  ...booking,
+  vehicleId: vehicleIdAliases[booking.vehicleId] || booking.vehicleId,
+}));
+
+export const resolveMarketplaceVehicleId = (vehicleId?: string) => {
+  if (!vehicleId) {
+    return vehicleId;
+  }
+
+  return vehicleIdAliases[vehicleId] || vehicleId;
+};
+
+export const resolveMarketplaceOwnerId = (ownerId?: string) => {
+  if (!ownerId) {
+    return ownerId;
+  }
+
+  return ownerIdAliases[ownerId] || ownerId;
+};
+
+export const findMarketplaceVehicleById = (vehicleId?: string) => {
+  const resolvedVehicleId = resolveMarketplaceVehicleId(vehicleId);
+  return marketplaceVehicles.find((vehicle) => vehicle.id === resolvedVehicleId);
+};
+
+export const findMarketplaceOwnerById = (ownerId?: string) => {
+  const resolvedOwnerId = resolveMarketplaceOwnerId(ownerId);
+  return ownerProfiles.find((profile) => profile.id === resolvedOwnerId);
+};
 
 export const vehicles: Vehicle[] = [
   {

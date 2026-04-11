@@ -679,6 +679,43 @@ const getCustomerSummariesByUserId = async (userId) => {
   });
 };
 
+const buildCustomerSummaryPayload = ({
+  id,
+  fullName,
+  email,
+  phone,
+  totalBookings = 0,
+  totalRequests = 0,
+  totalSpent = 0,
+  lastActivityAt = null,
+  preferredVehicle = null,
+  interestType = null,
+}) => {
+  const nameParts = String(fullName || '').trim().split(/\s+/).filter(Boolean);
+  const firstName = nameParts[0] || 'Client';
+  const lastName = nameParts.slice(1).join(' ') || 'Djambo';
+  const resolvedLastActivityAt = lastActivityAt ? new Date(lastActivityAt) : null;
+  const daysSinceActivity = resolvedLastActivityAt
+    ? Math.floor((Date.now() - resolvedLastActivityAt.getTime()) / 86400000)
+    : Number.POSITIVE_INFINITY;
+
+  return {
+    id,
+    firstName,
+    lastName,
+    fullName,
+    email,
+    phone,
+    status: daysSinceActivity <= 45 ? 'Actif' : 'A relancer',
+    totalBookings,
+    totalRequests,
+    totalSpent,
+    lastActivityAt,
+    preferredVehicle,
+    interestType: interestType === 'BUY' ? 'BUY' : interestType === 'RENT' ? 'RENT' : null,
+  };
+};
+
 const sendResendEmail = async ({ to, subject, html, text }) => {
   if (!resendApiKey) {
     if (isProduction) {
@@ -1166,6 +1203,59 @@ app.get('/api/customers', async (req, res) => {
   }
 });
 
+app.get('/api/customers/registered-users', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const ownerProfile = await getOwnerProfileByUserId(userId);
+    if (!ownerProfile) {
+      return res.status(403).json({ message: 'Owner profile required' });
+    }
+
+    const searchTerm = sanitizeText(req.query?.query || '');
+    const searchPattern = `%${searchTerm.toLowerCase()}%`;
+    const rows = await sql`
+      select
+        u.id,
+        u.full_name,
+        u.email,
+        coalesce(u.phone, '') as phone,
+        coalesce(u.profile_data ->> 'createdByOwnerId', '') as linked_owner_id
+      from app_users u
+      where u.role = 'USER'
+        and (
+          coalesce(u.profile_data ->> 'createdByOwnerId', '') = ''
+          or coalesce(u.profile_data ->> 'createdByOwnerId', '') = ${ownerProfile.id}::text
+        )
+        and (
+          ${searchTerm ? sql`
+            lower(u.full_name) like ${searchPattern}
+            or lower(u.email) like ${searchPattern}
+            or lower(coalesce(u.phone, '')) like ${searchPattern}
+          ` : sql`true`}
+        )
+      order by
+        case when coalesce(u.profile_data ->> 'createdByOwnerId', '') = ${ownerProfile.id}::text then 0 else 1 end,
+        u.full_name asc
+      limit 12;
+    `;
+
+    return res.json(rows.map((row) => ({
+      id: row.id,
+      fullName: row.full_name,
+      email: row.email,
+      phone: row.phone,
+      linkedToCurrentOwner: row.linked_owner_id === ownerProfile.id,
+    })));
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Registered users fetch failed' });
+  }
+});
+
 app.post('/api/customers', async (req, res) => {
   try {
     const userId = getRequestUserId(req);
@@ -1188,14 +1278,50 @@ app.post('/api/customers', async (req, res) => {
     }
 
     const existingUsers = await sql`
-      select id, full_name, email, coalesce(phone, '') as phone
+      select id, full_name, email, coalesce(phone, '') as phone, role, profile_data
       from app_users
       where email = ${email}
       limit 1;
     `;
 
     if (existingUsers.length > 0) {
-      return res.status(409).json({ message: 'Un client avec cet email existe deja.' });
+      const existingUser = existingUsers[0];
+      const existingProfileData = existingUser.profile_data && typeof existingUser.profile_data === 'object'
+        ? existingUser.profile_data
+        : {};
+      const linkedOwnerId = sanitizeText(existingProfileData.createdByOwnerId);
+
+      if (existingUser.role !== 'USER') {
+        return res.status(409).json({ message: 'Cet email est deja utilise par un autre type de compte.' });
+      }
+
+      if (linkedOwnerId && linkedOwnerId !== ownerProfile.id) {
+        return res.status(409).json({ message: 'Ce client est deja rattache a un autre espace proprietaire.' });
+      }
+
+      const linkedAt = sanitizeText(existingProfileData.manualCreatedAt) || new Date().toISOString();
+      const updatedUsers = await sql`
+        update app_users
+        set phone = ${phone || existingUser.phone || null},
+            profile_data = ${JSON.stringify({
+              ...existingProfileData,
+              createdByOwnerId: ownerProfile.id,
+              manualCreatedAt: linkedAt,
+              clientIntent: interestType,
+              source: existingProfileData.source || 'dashboard-manual-customer',
+            })}::jsonb
+        where id = ${existingUser.id}::uuid
+        returning id, full_name, email, coalesce(phone, '') as phone;
+      `;
+
+      return res.status(200).json(buildCustomerSummaryPayload({
+        id: updatedUsers[0].id,
+        fullName: updatedUsers[0].full_name,
+        email: updatedUsers[0].email,
+        phone: updatedUsers[0].phone,
+        lastActivityAt: linkedAt,
+        interestType,
+      }));
     }
 
     const createdAt = new Date().toISOString();
@@ -1221,25 +1347,15 @@ app.post('/api/customers', async (req, res) => {
     `;
 
     const createdUser = insertedUsers[0];
-    const nameParts = String(createdUser.full_name || '').trim().split(/\s+/).filter(Boolean);
-    const firstName = nameParts[0] || 'Client';
-    const lastName = nameParts.slice(1).join(' ') || 'Djambo';
 
-    return res.status(201).json({
+    return res.status(201).json(buildCustomerSummaryPayload({
       id: createdUser.id,
-      firstName,
-      lastName,
       fullName: createdUser.full_name,
       email: createdUser.email,
       phone: createdUser.phone,
-      status: 'Actif',
-      totalBookings: 0,
-      totalRequests: 0,
-      totalSpent: 0,
       lastActivityAt: createdAt,
-      preferredVehicle: null,
       interestType,
-    });
+    }));
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Customer creation failed' });

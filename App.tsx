@@ -2,15 +2,17 @@ import React, { useState, useEffect, Suspense } from 'react';
 import { HashRouter, Routes, Route, Link, useLocation, Navigate, Outlet } from 'react-router-dom';
 import { 
   LayoutDashboard, Car, Wrench, Settings, Bell, Search, 
-  Menu, X, LogOut, FileText, Users, Satellite, Database, Wifi, Loader2
+  Menu, X, LogOut, FileText, Users, Satellite, Database, Wifi, Loader2, Globe
 } from 'lucide-react';
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AIAssistant } from './components/AIAssistant';
+import { BrandLogo } from './components/BrandLogo';
 import { LandingPage } from './components/LandingPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { RegisterPage } from './components/auth/RegisterPage';
 import { ForgotPasswordPage } from './components/auth/ForgotPasswordPage';
 import { ResetPasswordPage } from './components/auth/ResetPasswordPage';
+import { CookieConsentBanner } from './components/legal/CookieConsentBanner';
 import { vehicles } from './services/mockData';
 
 // Lazy loading heavy components to optimize initial load time
@@ -25,6 +27,10 @@ const VehicleSearchPage = React.lazy(() => import('./components/marketplace/Vehi
 const VehicleDetailPage = React.lazy(() => import('./components/marketplace/VehicleDetailPage').then(module => ({ default: module.VehicleDetailPage })));
 const OwnerProfilePage = React.lazy(() => import('./components/marketplace/OwnerProfilePage').then(module => ({ default: module.OwnerProfilePage })));
 const OwnerDashboard = React.lazy(() => import('./components/owner/OwnerDashboard').then(module => ({ default: module.OwnerDashboard })));
+const SettingsPage = React.lazy(() => import('./components/SettingsPage').then(module => ({ default: module.SettingsPage })));
+const CookiePolicyPage = React.lazy(() => import('./components/legal/CookiePolicyPage').then(module => ({ default: module.CookiePolicyPage })));
+const PrivacyPolicyPage = React.lazy(() => import('./components/legal/PrivacyPolicyPage').then(module => ({ default: module.PrivacyPolicyPage })));
+const TermsOfUsePage = React.lazy(() => import('./components/legal/TermsOfUsePage').then(module => ({ default: module.TermsOfUsePage })));
 
 // Loading Component for Suspense
 const PageLoader = () => (
@@ -52,11 +58,19 @@ const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean; toggleSidebar: ()
   
   const links = [
     { path: '/app/dashboard', label: 'Tableau de bord', icon: LayoutDashboard },
+    ...(user?.role === 'PARC_AUTO' || user?.role === 'PARTICULIER'
+      ? [{ path: '/app/owner-dashboard', label: user.role === 'PARC_AUTO' ? 'Mon parc auto' : 'Mon espace proprietaire', icon: Globe }]
+      : []),
     { path: '/app/vehicles', label: 'Véhicules', icon: Car },
     { path: '/app/clients', label: 'Clients', icon: Users },
     { path: '/app/contracts', label: 'Contrats', icon: FileText },
     { path: '/app/maintenance', label: 'Maintenance', icon: Wrench },
     { path: '/app/settings', label: 'Paramètres', icon: Settings },
+  ];
+
+  const userRoleLabel = user?.role === 'PARC_AUTO' ? 'Espace parc auto' : user?.role === 'PARTICULIER' ? 'Espace proprietaire' : 'Espace utilisateur';
+  const publicLinks = [
+    { path: '/', label: 'Landing page', icon: Globe },
   ];
 
   return (
@@ -68,12 +82,10 @@ const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean; toggleSidebar: ()
       />
 
       {/* Sidebar Panel */}
-      <aside className={`fixed top-0 left-0 z-30 h-full w-64 bg-slate-900 text-white transition-transform duration-300 lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
-        <div className="flex items-center h-16 px-6 border-b border-slate-800">
-          <div className="w-8 h-8 bg-indigo-500 rounded-lg flex items-center justify-center mr-3">
-             <Car size={20} className="text-white" />
-          </div>
-          <span className="text-xl font-bold tracking-tight">Fleet<span className="text-indigo-400">Command</span></span>
+      <aside className={`fixed top-0 left-0 z-30 h-full w-72 bg-slate-950 text-white transition-transform duration-300 lg:translate-x-0 ${isOpen ? 'translate-x-0' : '-translate-x-full'}`}>
+        <div className="border-b border-white/10 px-6 py-5">
+          <BrandLogo theme="light" size="md" useFullLogo />
+          <p className="mt-3 text-xs font-semibold uppercase tracking-[0.18em] text-slate-500">{userRoleLabel}</p>
         </div>
 
         <nav className="p-4 space-y-1">
@@ -85,7 +97,7 @@ const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean; toggleSidebar: ()
                 key={link.path} 
                 to={link.path}
                 onClick={() => window.innerWidth < 1024 && toggleSidebar()}
-                className={`flex items-center gap-3 px-4 py-3 rounded-xl transition-colors ${isActive ? 'bg-indigo-600 text-white shadow-lg shadow-indigo-900/50' : 'text-slate-400 hover:text-white hover:bg-slate-800'}`}
+                className={`flex items-center gap-3 px-4 py-3 transition-colors ${isActive ? 'bg-white text-slate-950 shadow-lg' : 'text-slate-400 hover:text-white hover:bg-white/5'}`}
               >
                 <Icon size={20} />
                 <span className="font-medium text-sm">{link.label}</span>
@@ -94,10 +106,30 @@ const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean; toggleSidebar: ()
           })}
         </nav>
 
+        <div className="px-4 pt-2">
+          <p className="px-4 pb-2 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-500">Pages publiques</p>
+          <div className="space-y-1">
+            {publicLinks.map((link) => {
+              const Icon = link.icon;
+              return (
+                <Link
+                  key={link.path}
+                  to={link.path}
+                  onClick={() => window.innerWidth < 1024 && toggleSidebar()}
+                  className="flex items-center gap-3 px-4 py-3 text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
+                >
+                  <Icon size={20} />
+                  <span className="font-medium text-sm">{link.label}</span>
+                </Link>
+              );
+            })}
+          </div>
+        </div>
+
         <div className="absolute bottom-4 left-4 right-4">
           <button 
             onClick={logout}
-            className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-white hover:bg-slate-800 rounded-xl transition-colors"
+            className="flex items-center gap-3 w-full px-4 py-3 text-slate-400 hover:text-white hover:bg-white/5 transition-colors"
           >
             <LogOut size={20} />
             <span className="font-medium text-sm">Déconnexion</span>
@@ -110,31 +142,78 @@ const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean; toggleSidebar: ()
 
 // Header Component
 const Header = ({ toggleSidebar }: { toggleSidebar: () => void }) => {
+  const location = useLocation();
   const { user } = useAuth();
+
+  const routeMeta = React.useMemo(() => {
+    if (location.pathname.includes('/app/contracts')) {
+      return { title: 'Contrats', description: 'Dossiers actifs, chauffeur a la demande, suivi et paiement.' };
+    }
+    if (location.pathname.includes('/app/vehicles')) {
+      return { title: 'Vehicules', description: 'Inventaire, visuels et disponibilites.' };
+    }
+    if (location.pathname.includes('/app/owner-dashboard')) {
+      return { title: user?.role === 'PARC_AUTO' ? 'Parc auto' : 'Espace proprietaire', description: 'Parkings, voitures, occupation et reservations a venir.' };
+    }
+    if (location.pathname.includes('/app/settings')) {
+      return { title: 'Parametres', description: 'Identite, uploads, services et liens publics.' };
+    }
+    if (location.pathname.includes('/app/clients')) {
+      return { title: 'Clients', description: 'Relations, profils et suivi commercial.' };
+    }
+    return { title: 'Tableau de bord', description: 'Vue d ensemble des operations, revenus et disponibilites.' };
+  }, [location.pathname]);
   
   return (
-    <header className="h-16 bg-white border-b border-slate-200 sticky top-0 z-10 px-4 lg:px-8 flex items-center justify-between">
-      <div className="flex items-center gap-4">
-        <button onClick={toggleSidebar} className="lg:hidden p-2 text-slate-500 hover:bg-slate-100 rounded-lg">
+    <header className="sticky top-0 z-10 bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(248,250,252,0.86))] px-4 shadow-[0_10px_35px_rgba(15,23,42,0.06)] backdrop-blur-xl lg:px-8">
+      <div className="flex min-h-[96px] items-center justify-between gap-5">
+      <div className="flex min-w-0 items-center gap-4">
+        <button onClick={toggleSidebar} className="p-2 text-slate-500 transition-colors hover:bg-white/70 hover:text-slate-900 lg:hidden">
           <Menu size={24} />
         </button>
-        <div className="hidden md:flex items-center gap-2 text-slate-400 bg-slate-50 px-3 py-1.5 rounded-lg border border-slate-100">
-           <Search size={16} />
-           <input type="text" placeholder="Rechercher..." className="bg-transparent border-none outline-none text-sm w-48" />
+        <div className="min-w-0">
+          <h1 className="truncate text-2xl font-extrabold tracking-tight text-slate-950">{routeMeta.title}</h1>
+          <p className="hidden max-w-xl truncate text-sm text-slate-500 md:block">{routeMeta.description}</p>
         </div>
       </div>
 
-      <div className="flex items-center gap-4">
-        <button className="relative p-2 text-slate-500 hover:bg-slate-100 rounded-lg transition-colors">
+      <div className="flex items-center gap-3">
+        <div className="hidden xl:flex items-center gap-2 bg-white/80 px-4 py-2 text-slate-400 shadow-sm">
+           <Search size={15} />
+           <input type="text" placeholder="Rechercher contrat, client, vehicule..." className="w-56 bg-transparent border-none text-sm outline-none placeholder:text-slate-400" />
+        </div>
+        <nav className="hidden items-center gap-4 lg:flex">
+        <Link to="/" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-slate-950">
+          <Globe size={16} />
+          Landing page
+        </Link>
+        <Link to="/vehicles" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-slate-950">
+          <Car size={16} />
+          Catalogue public
+        </Link>
+        <Link to="/app/contracts" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-600 transition-colors hover:text-slate-950">
+          <FileText size={16} />
+          Contrats
+        </Link>
+        <Link to="/app/settings" className="inline-flex items-center gap-2 bg-slate-950 px-4 py-2.5 text-sm font-semibold text-white transition-colors hover:bg-slate-800">
+          <Settings size={16} />
+          Parametres
+        </Link>
+        </nav>
+        <button className="relative bg-white/80 p-2.5 text-slate-500 shadow-sm transition-colors hover:text-slate-900">
           <Bell size={20} />
           <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-white"></span>
         </button>
-        <div className="flex items-center gap-2">
-            <div className="h-8 w-8 bg-indigo-100 rounded-full flex items-center justify-center text-indigo-700 font-bold text-sm border-2 border-indigo-200">
+        <div className="flex items-center gap-3 bg-white/80 px-2.5 py-2 shadow-sm">
+            <div className="flex h-9 w-9 items-center justify-center bg-indigo-100 text-sm font-bold text-indigo-700">
             {user?.name ? user.name.substring(0,2).toUpperCase() : 'JD'}
             </div>
-            <span className="hidden md:block text-sm font-medium text-slate-700">{user?.name}</span>
+            <div className="hidden min-w-0 md:block">
+              <p className="truncate text-sm font-semibold text-slate-900">{user?.name}</p>
+              <p className="truncate text-xs text-slate-500">Session active</p>
+            </div>
         </div>
+      </div>
       </div>
     </header>
   );
@@ -156,7 +235,7 @@ const AppLayout = () => {
     <div className="min-h-screen bg-slate-50">
       <Sidebar isOpen={sidebarOpen} toggleSidebar={() => setSidebarOpen(false)} />
       
-      <div className="lg:pl-64 flex flex-col min-h-screen">
+      <div className="lg:pl-72 flex flex-col min-h-screen">
         <Header toggleSidebar={() => setSidebarOpen(true)} />
         
         <main className="flex-1 p-4 lg:p-8 overflow-x-hidden">
@@ -177,9 +256,9 @@ const SplashScreen = ({ isFadingOut }: { isFadingOut: boolean }) => {
   useEffect(() => {
     const texts = [
       'Connexion sécurisée...',
-      'Chargement de la flotte...',
-      'Synchronisation GPS...',
-      'Analyse des données...',
+      'Chargement de l espace Djambo...',
+      'Synchronisation des disponibilites...',
+      'Preparation de la vitrine...',
       'Prêt'
     ];
     let i = 0;
@@ -220,7 +299,7 @@ const SplashScreen = ({ isFadingOut }: { isFadingOut: boolean }) => {
         {/* Brand Name */}
         <div className="text-center mb-10">
           <h1 className="text-4xl font-bold text-white tracking-tight mb-2">
-            Fleet<span className="text-indigo-500">Command</span>
+            Djam<span className="text-indigo-500">bo</span>
           </h1>
           <div className="flex items-center justify-center gap-2 text-slate-500 text-xs uppercase tracking-[0.2em]">
             <span className="w-2 h-2 bg-green-500 rounded-full animate-pulse"></span>
@@ -253,7 +332,7 @@ const SplashScreen = ({ isFadingOut }: { isFadingOut: boolean }) => {
       
       {/* Version Number */}
       <div className="absolute bottom-6 text-slate-700 text-[10px] font-mono">
-        v2.4.0-RC • SECURE CONNECTION
+        DJAMBO APP • SECURE CONNECTION
       </div>
     </div>
   );
@@ -296,6 +375,21 @@ const AppContent = () => {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/cookies" element={
+          <Suspense fallback={<PageLoader />}>
+            <CookiePolicyPage />
+          </Suspense>
+        } />
+        <Route path="/privacy" element={
+          <Suspense fallback={<PageLoader />}>
+            <PrivacyPolicyPage />
+          </Suspense>
+        } />
+        <Route path="/terms" element={
+          <Suspense fallback={<PageLoader />}>
+            <TermsOfUsePage />
+          </Suspense>
+        } />
         
         {/* Marketplace public routes */}
         <Route path="/vehicles" element={
@@ -339,7 +433,7 @@ const AppContent = () => {
             <Route path="clients" element={<ClientList />} />
             <Route path="contracts" element={<ContractManager />} />
             <Route path="maintenance" element={<MaintenanceView />} />
-            <Route path="settings" element={<div className="p-8 text-center">Paramètres</div>} />
+            <Route path="settings" element={<SettingsPage />} />
             <Route path="owner-dashboard" element={<OwnerDashboard />} />
             <Route index element={<Navigate to="dashboard" />} />
           </Route>
@@ -347,6 +441,7 @@ const AppContent = () => {
         
         <Route path="*" element={<Navigate to="/" />} />
       </Routes>
+      <CookieConsentBanner />
     </HashRouter>
   );
 };

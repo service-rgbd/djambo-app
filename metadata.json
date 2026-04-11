@@ -1,5 +1,5 @@
 {
-  "name": "FleetCommand SaaS",
-  "description": "Un tableau de bord complet de gestion de flotte comprenant le suivi des véhicules en temps réel, la planification de la maintenance et des analyses de flotte alimentées par l'IA.",
+  "name": "Djambo",
+  "description": "Marketplace automobile premium pour louer, acheter et rouler en confiance avec un parcours simple et une flotte soigneusement presentee.",
   "requestFramePermissions": []
 }

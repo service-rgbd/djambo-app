@@ -1,7 +1,8 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useParams, Link } from 'react-router-dom';
-import { vehicles as allVehicles } from '../services/mockData';
-import { VehicleStatus, FuelType } from '../types';
+import { api, MarketplacePublicOwnerProfile, MarketplacePublicVehicle } from '../services/api';
+import { FuelType } from '../types';
+import { BrandLogo } from './BrandLogo';
 import { 
   Car, Calendar, CheckCircle, MapPin, Star, Filter, 
   ArrowRight, Zap, Droplet, Battery, Gauge, X, Phone, Users 
@@ -11,12 +12,50 @@ export const PublicStorefront: React.FC = () => {
   const { agencySlug } = useParams<{ agencySlug: string }>();
   const [selectedVehicleId, setSelectedVehicleId] = useState<string | null>(null);
   const [showSuccess, setShowSuccess] = useState(false);
+    const [ownerProfile, setOwnerProfile] = useState<MarketplacePublicOwnerProfile | null>(null);
+    const [allVehicles, setAllVehicles] = useState<MarketplacePublicVehicle[]>([]);
+    const [loading, setLoading] = useState(true);
+    const [error, setError] = useState('');
 
-  // Filter only active vehicles for the public
-  const availableVehicles = allVehicles.filter(v => v.status === VehicleStatus.Active);
+    useEffect(() => {
+        let isMounted = true;
 
-  // Mock Agency Data based on slug
-  const agencyName = agencySlug ? agencySlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : "Agence";
+        const loadStorefront = async () => {
+            if (!agencySlug) {
+                setLoading(false);
+                return;
+            }
+
+            try {
+                setLoading(true);
+                const response = await api.getStorefrontBySlug(agencySlug);
+                if (!isMounted) {
+                    return;
+                }
+                setOwnerProfile(response.ownerProfile);
+                setAllVehicles(response.vehicles);
+                setError('');
+            } catch (loadError) {
+                if (!isMounted) {
+                    return;
+                }
+                setError(loadError instanceof Error ? loadError.message : 'Impossible de charger cette vitrine.');
+            } finally {
+                if (isMounted) {
+                    setLoading(false);
+                }
+            }
+        };
+
+        void loadStorefront();
+
+        return () => {
+            isMounted = false;
+        };
+    }, [agencySlug]);
+
+    const availableVehicles = allVehicles.filter((vehicle) => vehicle.isAvailable);
+    const agencyName = ownerProfile?.displayName || (agencySlug ? agencySlug.split('-').map(w => w.charAt(0).toUpperCase() + w.slice(1)).join(' ') : 'Agence');
 
   const handleBooking = (e: React.FormEvent) => {
     e.preventDefault();
@@ -27,10 +66,17 @@ export const PublicStorefront: React.FC = () => {
     }, 1000);
   };
 
-  const getFuelIcon = (type: FuelType) => {
+    const getFuelIcon = (type: FuelType | string) => {
     switch (type) {
-      case FuelType.Electric: return <Zap size={14} className="text-yellow-500" />;
-      case FuelType.Hybrid: return <Battery size={14} className="text-emerald-500" />;
+            case FuelType.Electric:
+            case 'Electric':
+            case 'Electrique':
+            case 'Électrique':
+                return <Zap size={14} className="text-yellow-500" />;
+            case FuelType.Hybrid:
+            case 'Hybrid':
+            case 'Hybride':
+                return <Battery size={14} className="text-emerald-500" />;
       default: return <Droplet size={14} className="text-blue-500" />;
     }
   };
@@ -61,24 +107,22 @@ export const PublicStorefront: React.FC = () => {
       <header className="bg-white border-b border-slate-200 sticky top-0 z-20">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
            <div className="flex items-center gap-3">
-              <div className="w-10 h-10 bg-slate-900 rounded-xl flex items-center justify-center text-white">
-                  <Car size={24} />
-              </div>
+              <BrandLogo size="sm" subtitle={agencyName} useFullLogo />
               <div>
                   <h1 className="text-xl font-bold text-slate-900 leading-none">{agencyName}</h1>
                   <div className="flex items-center gap-1 text-xs text-slate-500 mt-1">
                       <MapPin size={10} />
-                      <span>Dakar, Sénégal</span>
+                      <span>{ownerProfile?.city || 'Dakar'}, {ownerProfile?.country || 'Senegal'}</span>
                       <span className="mx-1">•</span>
                       <Star size={10} className="text-yellow-400 fill-yellow-400" />
-                      <span>4.8 (124 avis)</span>
+                      <span>{ownerProfile ? `${ownerProfile.rating.toFixed(1)} (${ownerProfile.reviewCount} avis)` : 'Chargement...'}</span>
                   </div>
               </div>
            </div>
            
            <div className="hidden sm:flex items-center gap-4 text-sm font-medium text-slate-600">
                <a href="#" className="hover:text-slate-900">À propos</a>
-               <a href="#" className="hover:text-slate-900">Conditions</a>
+               <Link to="/terms" className="hover:text-slate-900">Conditions</Link>
                <a href="#" className="bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors">
                    <Phone size={16} className="inline mr-2" />
                    Contact
@@ -107,13 +151,15 @@ export const PublicStorefront: React.FC = () => {
 
       {/* Vehicle Grid */}
       <main className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
+         {error && <div className="mb-6 border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-700">{error}</div>}
+         {loading && <div className="mb-6 border border-slate-200 bg-white px-4 py-4 text-sm text-slate-500">Chargement de la vitrine...</div>}
          <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-8">
             {availableVehicles.map((vehicle) => (
                 <div key={vehicle.id} className="bg-white rounded-2xl overflow-hidden border border-slate-200 shadow-sm hover:shadow-xl hover:-translate-y-1 transition-all duration-300 group">
                     <div className="h-48 relative overflow-hidden">
                         <img 
-                            src={vehicle.imageUrl} 
-                            alt={`${vehicle.make} ${vehicle.model}`} 
+                            src={vehicle.images[0]?.url || ''} 
+                            alt={`${vehicle.brand} ${vehicle.model}`} 
                             className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-500"
                         />
                         <div className="absolute top-3 right-3 bg-white/90 backdrop-blur-sm px-2 py-1 rounded-lg text-xs font-bold text-slate-800 shadow-sm">
@@ -123,7 +169,7 @@ export const PublicStorefront: React.FC = () => {
                     <div className="p-5">
                         <div className="flex justify-between items-start mb-2">
                             <div>
-                                <h3 className="text-lg font-bold text-slate-900">{vehicle.make} {vehicle.model}</h3>
+                                <h3 className="text-lg font-bold text-slate-900">{vehicle.brand} {vehicle.model}</h3>
                                 <p className="text-sm text-slate-500">{vehicle.fuelType}</p>
                             </div>
                             <div className="w-8 h-8 rounded-full bg-slate-50 flex items-center justify-center border border-slate-100">
@@ -143,7 +189,7 @@ export const PublicStorefront: React.FC = () => {
                         <div className="flex items-end justify-between border-t border-slate-100 pt-4 mt-2">
                              <div>
                                  <p className="text-xs text-slate-400 font-medium uppercase">À partir de</p>
-                                 <p className="text-xl font-bold text-indigo-600">35,000 <span className="text-sm text-slate-600 font-normal">F/jour</span></p>
+                                 <p className="text-xl font-bold text-indigo-600">{vehicle.pricePerDay.toLocaleString()} <span className="text-sm text-slate-600 font-normal">F/jour</span></p>
                              </div>
                              <button 
                                 onClick={() => setSelectedVehicleId(vehicle.id)}
@@ -164,7 +210,7 @@ export const PublicStorefront: React.FC = () => {
             <div className="bg-white rounded-2xl w-full max-w-lg overflow-hidden shadow-2xl scale-100 animate-scale-up">
                 <div className="relative h-32 bg-slate-900">
                     <img 
-                        src={availableVehicles.find(v => v.id === selectedVehicleId)?.imageUrl} 
+                        src={availableVehicles.find(v => v.id === selectedVehicleId)?.images[0]?.url || ''} 
                         className="w-full h-full object-cover opacity-50"
                     />
                     <button 
@@ -176,7 +222,7 @@ export const PublicStorefront: React.FC = () => {
                     <div className="absolute bottom-4 left-6 text-white">
                         <p className="text-sm opacity-80">Réserver</p>
                         <h3 className="text-2xl font-bold">
-                            {availableVehicles.find(v => v.id === selectedVehicleId)?.make} {availableVehicles.find(v => v.id === selectedVehicleId)?.model}
+                            {availableVehicles.find(v => v.id === selectedVehicleId)?.brand} {availableVehicles.find(v => v.id === selectedVehicleId)?.model}
                         </h3>
                     </div>
                 </div>
@@ -215,7 +261,7 @@ export const PublicStorefront: React.FC = () => {
       )}
 
       <footer className="bg-slate-900 text-slate-500 py-8 text-center text-sm">
-          <p>Propulsé par <Link to="/" className="text-indigo-400 hover:text-white transition-colors">FleetCommand</Link></p>
+          <p>Propulse par <Link to="/" className="text-indigo-400 hover:text-white transition-colors">Djambo</Link></p>
       </footer>
     </div>
   );

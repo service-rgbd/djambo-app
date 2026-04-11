@@ -200,6 +200,11 @@ export interface Parking {
   name: string;
   city: string;
   address: string;
+  latitude?: number | null;
+  longitude?: number | null;
+  locationConfirmedAt?: string | null;
+  locationUpdatedAt?: string | null;
+  locationEditableAfter?: string | null;
   accessType?: string;
   openingHours?: string;
   securityFeatures?: string[];

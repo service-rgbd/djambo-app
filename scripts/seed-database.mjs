@@ -3,6 +3,7 @@ import path from 'node:path';
 import crypto from 'node:crypto';
 import postgres from 'postgres';
 import { loadEnvConfig } from '../utils/loadEnv.mjs';
+import { MARKETPLACE_OWNER_IDS, MARKETPLACE_PARKING_IDS, MARKETPLACE_USER_IDS, MARKETPLACE_VEHICLE_IDS } from '../shared/marketplaceIds.js';
 
 const workspaceRoot = process.cwd();
 
@@ -12,63 +13,63 @@ const databaseUrl = process.env.DATABASE_URL || env.DATABASE_URL;
 const sql = postgres(databaseUrl, { max: 1, prepare: false });
 
 const users = [
-  { id: '11111111-1111-1111-1111-111111111111', full_name: 'AutoLoc Dakar', email: 'autoloc@fleetcommand.africa', role: 'PARC_AUTO' },
-  { id: '22222222-2222-2222-2222-222222222222', full_name: 'Yacouba Traore', email: 'yacouba@fleetcommand.africa', role: 'PARTICULIER' },
-  { id: '33333333-3333-3333-3333-333333333333', full_name: 'Premium Cars CI', email: 'premium@fleetcommand.africa', role: 'PARC_AUTO' },
-  { id: '44444444-4444-4444-4444-444444444444', full_name: 'Client Demo', email: 'client@fleetcommand.africa', role: 'USER' },
+  { id: MARKETPLACE_USER_IDS.autolocDakar, full_name: 'AutoLoc Dakar', email: 'autoloc@fleetcommand.africa', role: 'PARC_AUTO' },
+  { id: MARKETPLACE_USER_IDS.yacoubaTraore, full_name: 'Yacouba Traore', email: 'yacouba@fleetcommand.africa', role: 'PARTICULIER' },
+  { id: MARKETPLACE_USER_IDS.premiumCarsCi, full_name: 'Premium Cars CI', email: 'premium@fleetcommand.africa', role: 'PARC_AUTO' },
+  { id: MARKETPLACE_USER_IDS.clientDemo, full_name: 'Client Demo', email: 'client@fleetcommand.africa', role: 'USER' },
 ];
 
 const ownerProfiles = [
   {
-    id: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa', user_id: users[0].id, display_name: 'AutoLoc Dakar', description: 'Agence premium a Dakar.',
+    id: MARKETPLACE_OWNER_IDS.autolocDakar, user_id: users[0].id, display_name: 'AutoLoc Dakar', description: 'Agence premium a Dakar.',
     address: 'Avenue Bourguiba, Plateau', city: 'Dakar', country: 'Senegal', whatsapp: '+221771234567', verified: true,
     response_time: 'Repond en moins d\'1h', member_since: '2021-03-10', rating: 4.8, review_count: 127, vehicle_count: 3,
   },
   {
-    id: 'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb', user_id: users[1].id, display_name: 'Yacouba Traore', description: 'Particulier soigneux a Abidjan.',
+    id: MARKETPLACE_OWNER_IDS.yacoubaTraore, user_id: users[1].id, display_name: 'Yacouba Traore', description: 'Particulier soigneux a Abidjan.',
     address: 'Cocody Riviera 3', city: 'Abidjan', country: 'Cote d\'Ivoire', whatsapp: '+2250789123456', verified: true,
     response_time: 'Repond en moins de 3h', member_since: '2022-07-15', rating: 4.5, review_count: 23, vehicle_count: 1,
   },
   {
-    id: 'cccccccc-cccc-cccc-cccc-cccccccccccc', user_id: users[2].id, display_name: 'Premium Cars CI', description: 'Leader du haut de gamme a Abidjan.',
+    id: MARKETPLACE_OWNER_IDS.premiumCarsCi, user_id: users[2].id, display_name: 'Premium Cars CI', description: 'Leader du haut de gamme a Abidjan.',
     address: 'Marcory', city: 'Abidjan', country: 'Cote d\'Ivoire', whatsapp: '+2250798765432', verified: true,
     response_time: 'Repond en moins de 30 min', member_since: '2020-01-05', rating: 4.9, review_count: 314, vehicle_count: 2,
   },
 ];
 
 const parkings = [
-  { id: 'dddddddd-dddd-dddd-dddd-dddddddddddd', owner_id: ownerProfiles[0].id, name: 'Parking Plateau Signature', city: 'Dakar', address: 'Plateau, Dakar', access_type: 'vip', opening_hours: '24/7', security_features: ['Camera', 'Gardien', 'Acces badge'], capacity_total: 20 },
-  { id: 'eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee', owner_id: ownerProfiles[1].id, name: 'Parking Riviera Select', city: 'Abidjan', address: 'Riviera 3, Abidjan', access_type: 'prive', opening_hours: '06:00 - 23:00', security_features: ['Camera', 'Portail automatique'], capacity_total: 8 },
-  { id: 'ffffffff-ffff-ffff-ffff-ffffffffffff', owner_id: ownerProfiles[2].id, name: 'Parking Marcory Executive', city: 'Abidjan', address: 'Zone industrielle, Marcory', access_type: 'business', opening_hours: '24/7', security_features: ['Camera', 'Gardien', 'Lavage premium'], capacity_total: 18 },
+  { id: MARKETPLACE_PARKING_IDS.plateauSignature, owner_id: ownerProfiles[0].id, name: 'Parking Plateau Signature', city: 'Dakar', address: 'Plateau, Dakar', access_type: 'vip', opening_hours: '24/7', security_features: ['Camera', 'Gardien', 'Acces badge'], capacity_total: 20 },
+  { id: MARKETPLACE_PARKING_IDS.rivieraSelect, owner_id: ownerProfiles[1].id, name: 'Parking Riviera Select', city: 'Abidjan', address: 'Riviera 3, Abidjan', access_type: 'prive', opening_hours: '06:00 - 23:00', security_features: ['Camera', 'Portail automatique'], capacity_total: 8 },
+  { id: MARKETPLACE_PARKING_IDS.marcoryExecutive, owner_id: ownerProfiles[2].id, name: 'Parking Marcory Executive', city: 'Abidjan', address: 'Zone industrielle, Marcory', access_type: 'business', opening_hours: '24/7', security_features: ['Camera', 'Gardien', 'Lavage premium'], capacity_total: 18 },
 ];
 
 const vehicles = [
   {
-    id: '10000000-0000-0000-0000-000000000001', owner_id: ownerProfiles[0].id, parking_id: parkings[0].id, title: 'Toyota Land Cruiser GX 2022', brand: 'Toyota', model: 'Land Cruiser GX', year: 2022,
+    id: MARKETPLACE_VEHICLE_IDS.landCruiser, owner_id: ownerProfiles[0].id, parking_id: parkings[0].id, title: 'Toyota Land Cruiser GX 2022', brand: 'Toyota', model: 'Land Cruiser GX', year: 2022,
     category: 'SUV', fuel_type: 'Diesel', transmission: 'Automatique', seats: 7, price_per_day: 45000, is_for_rent: true, is_for_sale: false,
     description: '4x4 premium pour route et confort.', features: ['Climatisation', 'GPS', 'Cuir'], location: 'Plateau, Dakar', city: 'Dakar', rating: 4.9,
     review_count: 38, view_count: 412, is_featured: true, is_available: false, mileage: 28000, color: 'Blanc Perle', conditions: 'Caution 200 000 FCFA.'
   },
   {
-    id: '10000000-0000-0000-0000-000000000002', owner_id: ownerProfiles[0].id, parking_id: parkings[0].id, title: 'Toyota Prado TXL 2021', brand: 'Toyota', model: 'Prado TXL', year: 2021,
+    id: MARKETPLACE_VEHICLE_IDS.pradoTxl, owner_id: ownerProfiles[0].id, parking_id: parkings[0].id, title: 'Toyota Prado TXL 2021', brand: 'Toyota', model: 'Prado TXL', year: 2021,
     category: 'SUV', fuel_type: 'Diesel', transmission: 'Automatique', seats: 7, price_per_day: 50000, is_for_rent: true, is_for_sale: true,
     description: 'SUV robuste et elegant.', features: ['7 places', '4x4', 'GPS'], location: 'Plateau, Dakar', city: 'Dakar', rating: 4.8,
     review_count: 56, view_count: 498, is_featured: true, is_available: true, mileage: 35000, color: 'Blanc Nacre', conditions: 'Historique complet.'
   },
   {
-    id: '10000000-0000-0000-0000-000000000003', owner_id: ownerProfiles[1].id, parking_id: parkings[1].id, title: 'Honda Accord Sport 2020', brand: 'Honda', model: 'Accord Sport', year: 2020,
+    id: MARKETPLACE_VEHICLE_IDS.hondaAccord, owner_id: ownerProfiles[1].id, parking_id: parkings[1].id, title: 'Honda Accord Sport 2020', brand: 'Honda', model: 'Accord Sport', year: 2020,
     category: 'BERLINE', fuel_type: 'Petrol', transmission: 'Automatique', seats: 5, price_per_day: 22000, is_for_rent: true, is_for_sale: true,
     description: 'Berline sportive et confortable.', features: ['Bluetooth', 'Android Auto'], location: 'Cocody Riviera 3, Abidjan', city: 'Abidjan', rating: 4.5,
     review_count: 16, view_count: 156, is_featured: false, is_available: true, mileage: 44000, color: 'Rouge Rallye', conditions: 'CT valide.'
   },
   {
-    id: '10000000-0000-0000-0000-000000000004', owner_id: ownerProfiles[2].id, parking_id: parkings[2].id, title: 'Mercedes-Benz C 300 AMG Line', brand: 'Mercedes-Benz', model: 'C 300 AMG Line', year: 2021,
+    id: MARKETPLACE_VEHICLE_IDS.mercedesC300, owner_id: ownerProfiles[2].id, parking_id: parkings[2].id, title: 'Mercedes-Benz C 300 AMG Line', brand: 'Mercedes-Benz', model: 'C 300 AMG Line', year: 2021,
     category: 'BERLINE', fuel_type: 'Petrol', transmission: 'Automatique', seats: 5, price_per_day: 55000, is_for_rent: true, is_for_sale: false,
     description: 'Berline executive premium.', features: ['Toit ouvrant', 'USB-C', 'Son premium'], location: 'Marcory, Abidjan', city: 'Abidjan', rating: 4.8,
     review_count: 51, view_count: 389, is_featured: true, is_available: false, mileage: 19500, color: 'Gris Selenite', conditions: 'Assurance incluse.'
   },
   {
-    id: '10000000-0000-0000-0000-000000000005', owner_id: ownerProfiles[2].id, parking_id: parkings[2].id, title: 'Mercedes-Benz Vito Tourer 9 places', brand: 'Mercedes-Benz', model: 'Vito Tourer', year: 2020,
+    id: MARKETPLACE_VEHICLE_IDS.vitoTourer, owner_id: ownerProfiles[2].id, parking_id: parkings[2].id, title: 'Mercedes-Benz Vito Tourer 9 places', brand: 'Mercedes-Benz', model: 'Vito Tourer', year: 2020,
     category: 'UTILITAIRE', fuel_type: 'Diesel', transmission: 'Automatique', seats: 9, price_per_day: 45000, is_for_rent: true, is_for_sale: false,
     description: 'Transport premium de groupe.', features: ['9 places', 'Clim arriere'], location: 'Marcory, Abidjan', city: 'Abidjan', rating: 4.5,
     review_count: 41, view_count: 267, is_featured: false, is_available: true, mileage: 67000, color: 'Noir', conditions: 'Chauffeur disponible.'

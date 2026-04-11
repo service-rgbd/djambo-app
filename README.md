@@ -2,7 +2,7 @@
 <img width="1200" height="475" alt="GHBanner" src="https://github.com/user-attachments/assets/0aa67016-6eaf-458a-adb2-6e31a0763ed6" />
 </div>
 
-# FleetCommand
+# Djambo
 
 Marketplace automobile premium avec frontend React/Vite et backend Express/PostgreSQL.
 
@@ -20,7 +20,9 @@ Prérequis : Node.js 20+
 5. Lancer le frontend Vite
    `npm run dev`
 
-En local, le frontend appelle automatiquement `http://localhost:8787` via `VITE_API_BASE_URL` défini dans [/.env.local](.env.local).
+En local, le frontend pointe par defaut vers l API Render `https://api.djambo-app.com` via `VITE_API_BASE_URL` defini dans [/.env.local](.env.local).
+
+Si vous voulez tester explicitement le backend local a la place, remplacez temporairement cette variable par `http://localhost:8787`.
 
 ## Variables d'environnement
 
@@ -35,6 +37,16 @@ Exemple minimal dans [/.env.example](.env.example) :
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `VITE_API_BASE_URL`
+
+Variables optionnelles pour les uploads photo parking/vehicule via Cloudflare R2 :
+
+- `UPLOAD_STORAGE_PROVIDER=r2`
+- `R2_ACCOUNT_ID`
+- `R2_BUCKET_NAME`
+- `R2_ACCESS_KEY_ID`
+- `R2_SECRET_ACCESS_KEY`
+- `R2_PUBLIC_BASE_URL`
+- `MAX_UPLOAD_SIZE_MB`
 
 ## Déploiement GitHub + Render
 
@@ -52,7 +64,7 @@ Exemple minimal dans [/.env.example](.env.example) :
 
 ### 2. Déployer sur Render
 
-Le fichier [render.yaml](render.yaml) prépare deux services :
+Le fichier [render.yaml](render.yaml) prepare deux services :
 
 1. `fleetcommand-api`
    service web Node/Express
@@ -89,9 +101,24 @@ Frontend Render :
 8. `GOOGLE_CLIENT_SECRET`
 9. `PORT` sera injecté automatiquement par Render
 
+Pour activer plus tard les uploads de photos parking/vehicule depuis le backend Render, ajoutez aussi :
+
+1. `UPLOAD_STORAGE_PROVIDER=r2`
+2. `R2_ACCOUNT_ID=<cloudflare-account-id>`
+3. `R2_BUCKET_NAME=djambo-app-uploads`
+4. `R2_ACCESS_KEY_ID=<r2-access-key-id>`
+5. `R2_SECRET_ACCESS_KEY=<r2-secret-access-key>`
+6. `R2_PUBLIC_BASE_URL=https://media.djambo-app.com`
+7. `MAX_UPLOAD_SIZE_MB=10`
+
 ### 5. Variables Render à définir sur le frontend
 
 1. `VITE_API_BASE_URL=https://api.djambo-app.com`
+
+## Notes de developpement local
+
+- Si `RESEND_API_KEY` est absent en local, le backend ne bloque plus l inscription: le compte est active automatiquement en mode developpement.
+- En production Render, `RESEND_API_KEY` reste obligatoire.
 
 ### 6. Google Auth à renseigner
 

@@ -58,7 +58,7 @@ export const ResetPasswordPage: React.FC = () => {
 
         <div className="mx-auto w-full max-w-sm lg:w-full lg:max-w-[430px] relative z-10">
           <div className="mb-4">
-            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-indigo-600 mb-2">FleetCommand Plus</p>
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-indigo-600 mb-2">Djambo</p>
             <h1 className="text-3xl lg:text-[2rem] font-extrabold text-slate-900 tracking-tight">Choisissez un nouveau mot de passe</h1>
             <p className="mt-2 text-sm text-slate-600 leading-relaxed">Le lien recu par email vous permet de definir un nouveau secret d'acces.</p>
           </div>
@@ -66,7 +66,7 @@ export const ResetPasswordPage: React.FC = () => {
           <div className="mt-5 bg-white/92 backdrop-blur-xl py-6 px-4 shadow-[0_30px_100px_rgba(15,23,42,0.12)] rounded-[28px] sm:px-7 border border-white/80">
             <div className="text-center mb-6">
               <div className="flex items-center justify-center mb-4">
-                <BrandLogo size="sm" subtitle="Securite du compte" />
+                <BrandLogo size="sm" />
               </div>
               <h2 className="text-2xl font-extrabold text-slate-900 tracking-tight">Nouveau mot de passe</h2>
               <p className="mt-1 text-sm text-slate-500">Le lien est valable 30 minutes.</p>

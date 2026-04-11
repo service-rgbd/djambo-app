@@ -15,8 +15,9 @@ import {
   Zap,
 } from 'lucide-react';
 import { PublicSiteHeader } from '../../components/PublicSiteHeader';
-import { api, MarketplacePublicVehicle } from '../../services/api';
+import { api, isRealUserMarketplaceVehicle, MarketplacePublicVehicle } from '../../services/api';
 import { VehicleCategory, FuelType, SearchFilters } from '../../types';
+import { HeroBlock } from './HeroBlock';
 
 const LUXE_SCENE_SRC = new URL('../../luxe-logo.jpeg', import.meta.url).href;
 const SUV_SCENE_SRC = new URL('../../SUV-FAMILLE.webp', import.meta.url).href;
@@ -137,9 +138,29 @@ const StarRating = ({ rating }: { rating: number }) => (
   </div>
 );
 
+const getOwnerTypeBadge = (vehicle: MarketplacePublicVehicle) => vehicle.ownerProfile.type === 'PARC_AUTO'
+  ? {
+      label: 'Parc auto',
+      className: 'border border-sky-100 bg-sky-50 text-sky-700',
+    }
+  : {
+      label: 'Particulier',
+      className: 'border border-orange-100 bg-orange-50 text-orange-700',
+    };
+
+const handleEnterOrSpace = (event: React.KeyboardEvent<HTMLElement>, onActivate: () => void) => {
+  if (event.key === 'Enter' || event.key === ' ') {
+    event.preventDefault();
+    onActivate();
+  }
+};
+
 const VehicleCard = ({ vehicle, onClick, onPreview }: { vehicle: MarketplacePublicVehicle; onClick: () => void; onPreview: () => void }) => (
   <article
     onClick={onClick}
+    onKeyDown={(event) => handleEnterOrSpace(event, onClick)}
+    role="button"
+    tabIndex={0}
     className="group cursor-pointer overflow-hidden border border-slate-200 bg-white transition-all hover:-translate-y-0.5 hover:shadow-[0_24px_80px_rgba(15,23,42,0.12)]"
   >
     <div className="relative aspect-[4/3] overflow-hidden bg-slate-100">
@@ -149,13 +170,19 @@ const VehicleCard = ({ vehicle, onClick, onPreview }: { vehicle: MarketplacePubl
         className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.04]"
         loading="lazy"
       />
-      <div className="absolute inset-0 bg-gradient-to-t from-slate-950/78 via-slate-950/12 to-transparent" />
+      <HeroBlock variant="light" overlayClassName="bg-[linear-gradient(180deg,rgba(0,0,0,0.14)_0%,rgba(0,0,0,0.28)_36%,rgba(0,0,0,0.74)_100%)]">
       <div className="absolute left-3 top-3 flex flex-wrap gap-1.5 sm:left-4 sm:top-4 sm:gap-2">
         <span className="bg-white/96 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-900 sm:px-3 sm:text-[11px]">{vehicle.category}</span>
+        <span className={'px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] sm:px-3 sm:text-[11px] ' + getOwnerTypeBadge(vehicle).className}>{getOwnerTypeBadge(vehicle).label}</span>
         {vehicle.isFeatured && (
           <span className="inline-flex items-center gap-1 bg-amber-400 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-slate-950 sm:px-3 sm:text-[11px]">
             <Zap size={10} />
             Signature
+          </span>
+        )}
+        {isRealUserMarketplaceVehicle(vehicle) && (
+          <span className="inline-flex items-center gap-1 bg-emerald-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] text-white sm:px-3 sm:text-[11px]">
+            Nouveau depot
           </span>
         )}
       </div>
@@ -166,23 +193,24 @@ const VehicleCard = ({ vehicle, onClick, onPreview }: { vehicle: MarketplacePubl
         {vehicle.isAvailable ? 'Disponible' : 'Indisponible'}
       </span>
       <div className="absolute inset-x-3 bottom-3 flex items-end justify-between gap-3 sm:inset-x-4 sm:bottom-4">
-        <div className="min-w-0">
+        <div className="min-w-0 rounded-2xl bg-slate-950/42 px-3 py-2.5 backdrop-blur-md sm:px-4 sm:py-3">
           <h3 className="line-clamp-1 text-lg font-extrabold text-white sm:text-[1.35rem]">{vehicle.brand} {vehicle.model}</h3>
           <p className="mt-1 line-clamp-1 text-[11px] uppercase tracking-[0.12em] text-white/70 sm:text-xs">{vehicle.city} • {vehicle.year} • {vehicle.ownerProfile.type === 'PARC_AUTO' ? 'Agence' : 'Particulier'}</p>
         </div>
-        <div className="shrink-0 bg-white/10 px-2.5 py-1.5 backdrop-blur-md sm:px-3 sm:py-2">
+        <div className="shrink-0 rounded-2xl bg-white/12 px-2.5 py-1.5 backdrop-blur-md sm:px-3 sm:py-2">
           <div className="flex items-center gap-1.5">
             <StarRating rating={vehicle.rating} />
             <span className="text-xs font-bold text-white">{vehicle.rating.toFixed(1)}</span>
           </div>
         </div>
       </div>
+      </HeroBlock>
     </div>
 
     <div className="space-y-4 p-3 sm:p-4">
       <div className="space-y-2">
         <div className="flex items-start justify-between gap-3">
-          <div>
+          <div className="min-w-0">
             <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">Presentation produit</p>
             <p className="mt-1 text-sm font-bold text-slate-900 sm:text-[15px]">{VEHICLE_USAGE_LABEL[vehicle.category] || 'Presentation claire et directe'}</p>
           </div>
@@ -221,7 +249,7 @@ const VehicleCard = ({ vehicle, onClick, onPreview }: { vehicle: MarketplacePubl
       </div>
 
       <div className="flex items-end justify-between gap-3 border-t border-slate-200 pt-4">
-        <div>
+        <div className="min-w-0">
           {vehicle.isForRent && (
             <p className="text-lg font-extrabold text-slate-900 sm:text-xl">
               {vehicle.pricePerDay.toLocaleString()} <span className="text-xs font-medium text-slate-500">FCFA / jour</span>
@@ -343,10 +371,21 @@ export const VehicleSearchPage: React.FC = () => {
   const categorySections = useMemo(
     () => CATEGORY_ORDER.map((category) => ({
       category,
-      vehicles: filtered.filter((vehicle) => vehicle.category === category),
+      vehicles: [
+        ...filtered.filter((vehicle) => vehicle.category === category && isRealUserMarketplaceVehicle(vehicle)),
+        ...filtered.filter((vehicle) => vehicle.category === category && !isRealUserMarketplaceVehicle(vehicle)),
+      ],
     })).filter((section) => section.vehicles.length > 0),
     [filtered, marketplaceVehicles]
   );
+
+  const showcaseSourceVehicles = useMemo(() => {
+    const source = filtered.length > 0 ? filtered : marketplaceVehicles;
+    return [
+      ...source.filter((vehicle) => isRealUserMarketplaceVehicle(vehicle)),
+      ...source.filter((vehicle) => !isRealUserMarketplaceVehicle(vehicle)),
+    ];
+  }, [filtered, marketplaceVehicles]);
 
   const categoryOverview = useMemo(
     () => CATEGORY_ORDER.map((category) => ({
@@ -358,13 +397,13 @@ export const VehicleSearchPage: React.FC = () => {
   );
 
   const showcaseVehicles = useMemo(
-    () => (filtered.length > 0 ? filtered : marketplaceVehicles).slice(0, 3),
-    [filtered, marketplaceVehicles]
+    () => showcaseSourceVehicles.slice(0, 3),
+    [showcaseSourceVehicles]
   );
 
   const editorialVehicles = useMemo(
-    () => (filtered.length > 0 ? filtered : marketplaceVehicles).slice(0, 5),
-    [filtered, marketplaceVehicles]
+    () => showcaseSourceVehicles.slice(0, 5),
+    [showcaseSourceVehicles]
   );
 
   const leadVehicle = editorialVehicles[0];
@@ -442,9 +481,11 @@ export const VehicleSearchPage: React.FC = () => {
         <div className="w-full px-1.5 sm:px-4 lg:px-6 xl:px-8">
           {leadVehicle && (
             <div className="mb-5 grid gap-px overflow-hidden bg-slate-200 lg:grid-cols-[1.08fr_0.92fr] xl:max-h-[700px]">
-              <button
-                type="button"
+              <article
                 onClick={() => navigate('/vehicles/' + leadVehicle.id)}
+                onKeyDown={(event) => handleEnterOrSpace(event, () => navigate('/vehicles/' + leadVehicle.id))}
+                role="button"
+                tabIndex={0}
                 className="group relative min-h-[380px] overflow-hidden bg-slate-950 text-left sm:min-h-[440px] xl:min-h-[560px]"
               >
                 <img
@@ -453,11 +494,18 @@ export const VehicleSearchPage: React.FC = () => {
                   className="absolute inset-0 h-full w-full object-cover transition-transform duration-700 group-hover:scale-[1.03]"
                   loading="eager"
                 />
-                <div className="absolute inset-0 bg-[linear-gradient(180deg,rgba(2,6,23,0.15)_0%,rgba(2,6,23,0.42)_38%,rgba(2,6,23,0.9)_100%)]" />
-                <div className="relative flex h-full flex-col justify-between p-4 sm:p-6 lg:p-8">
+                <HeroBlock
+                  variant="light"
+                  overlayClassName="bg-[linear-gradient(180deg,rgba(0,0,0,0.18)_0%,rgba(0,0,0,0.42)_38%,rgba(0,0,0,0.76)_100%)]"
+                  contentClassName="flex h-full flex-col justify-between p-4 sm:p-6 lg:p-8"
+                >
                   <div className="flex flex-wrap items-center gap-2">
                     <span className="bg-white px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-950">Selection Djambo</span>
                     <span className="bg-white/10 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white backdrop-blur-sm">{leadVehicle.category}</span>
+                    <span className={'px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] ' + getOwnerTypeBadge(leadVehicle).className}>{getOwnerTypeBadge(leadVehicle).label}</span>
+                    {isRealUserMarketplaceVehicle(leadVehicle) && (
+                      <span className="bg-emerald-500 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.18em] text-white">Vehicule utilisateur</span>
+                    )}
                     <button
                       type="button"
                       onClick={(event) => {
@@ -501,15 +549,17 @@ export const VehicleSearchPage: React.FC = () => {
                       </div>
                     </div>
                   </div>
-                </div>
-              </button>
+                </HeroBlock>
+              </article>
 
               <div className="grid gap-px bg-slate-200 sm:grid-cols-2 lg:grid-cols-1 xl:max-h-[700px]">
                 {supportingVehicles.map((vehicle) => (
-                  <button
+                  <article
                     key={vehicle.id}
-                    type="button"
                     onClick={() => navigate('/vehicles/' + vehicle.id)}
+                    onKeyDown={(event) => handleEnterOrSpace(event, () => navigate('/vehicles/' + vehicle.id))}
+                    role="button"
+                    tabIndex={0}
                     className="group grid min-h-[190px] grid-cols-[0.95fr_1.05fr] bg-white text-left sm:min-h-[220px] xl:min-h-0 xl:grid-cols-[0.88fr_1.12fr]"
                   >
                     <div className="relative overflow-hidden bg-slate-100">
@@ -523,6 +573,12 @@ export const VehicleSearchPage: React.FC = () => {
                     <div className="flex flex-col justify-between p-4 sm:p-5">
                       <div>
                         <p className="text-[10px] font-semibold uppercase tracking-[0.18em] text-slate-400">{vehicle.category}</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className={'px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ' + getOwnerTypeBadge(vehicle).className}>{getOwnerTypeBadge(vehicle).label}</span>
+                          {isRealUserMarketplaceVehicle(vehicle) && (
+                            <span className="bg-emerald-50 px-2 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-emerald-700">Nouveau depot</span>
+                          )}
+                        </div>
                         <h2 className="mt-2 text-lg font-extrabold text-slate-900 sm:text-xl">{vehicle.brand} {vehicle.model}</h2>
                         <p className="mt-2 line-clamp-2 text-sm leading-relaxed text-slate-500">{vehicle.description}</p>
                       </div>
@@ -548,7 +604,7 @@ export const VehicleSearchPage: React.FC = () => {
                         </div>
                       </div>
                     </div>
-                  </button>
+                  </article>
                 ))}
               </div>
             </div>
@@ -797,17 +853,25 @@ export const VehicleSearchPage: React.FC = () => {
 
             <div className="mt-4 grid gap-3 sm:gap-4 lg:grid-cols-[1.15fr_0.85fr] lg:mt-5">
               {showcaseVehicles[0] && (
-                <button
-                  type="button"
+                <article
                   onClick={() => navigate('/vehicles/' + showcaseVehicles[0].id)}
+                  onKeyDown={(event) => handleEnterOrSpace(event, () => navigate('/vehicles/' + showcaseVehicles[0].id))}
+                  role="button"
+                  tabIndex={0}
                   className="group relative overflow-hidden border border-slate-200 bg-slate-200 text-left"
                 >
                   <div className="relative aspect-[4/3] overflow-hidden sm:aspect-[16/10]">
                     <img src={showcaseVehicles[0].images[0]?.url} alt={showcaseVehicles[0].title} className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105" loading="lazy" />
-                    <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-black/10 to-transparent" />
+                    <HeroBlock variant="light" overlayClassName="bg-[linear-gradient(180deg,rgba(0,0,0,0.12)_0%,rgba(0,0,0,0.2)_40%,rgba(0,0,0,0.68)_100%)]">
                     <div className="absolute inset-x-4 bottom-4 flex items-end justify-between gap-3 sm:inset-x-5 sm:bottom-5 sm:gap-4">
                       <div className="min-w-0">
                         <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/65">Produit vedette</p>
+                        <div className="mt-2 flex flex-wrap gap-2">
+                          <span className={'px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] ' + getOwnerTypeBadge(showcaseVehicles[0]).className}>{getOwnerTypeBadge(showcaseVehicles[0]).label}</span>
+                          {isRealUserMarketplaceVehicle(showcaseVehicles[0]) && (
+                            <span className="bg-emerald-500 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-white">Mis en avant</span>
+                          )}
+                        </div>
                         <h3 className="mt-1.5 line-clamp-2 text-xl font-extrabold text-white sm:mt-2 sm:text-2xl">{showcaseVehicles[0].brand} {showcaseVehicles[0].model}</h3>
                         <p className="mt-1.5 line-clamp-2 text-xs text-white/80 sm:mt-2 sm:text-sm">{showcaseVehicles[0].city} • {showcaseVehicles[0].category} • {showcaseVehicles[0].pricePerDay.toLocaleString()} FCFA / jour</p>
                       </div>
@@ -825,8 +889,9 @@ export const VehicleSearchPage: React.FC = () => {
                         <span className="bg-white/10 px-3 py-2 text-[11px] font-semibold text-white backdrop-blur-sm">Voir la fiche</span>
                       </div>
                     </div>
+                    </HeroBlock>
                   </div>
-                </button>
+                </article>
               )}
 
               <div className="grid gap-3 sm:grid-cols-2 sm:gap-4 lg:grid-cols-1">
@@ -887,8 +952,8 @@ export const VehicleSearchPage: React.FC = () => {
                   <div className={
                     'absolute inset-0 ' +
                     (filters.category === item.category
-                      ? 'bg-gradient-to-t from-slate-950 via-slate-950/82 to-slate-950/40'
-                      : 'bg-gradient-to-t from-slate-950/96 via-slate-950/78 to-slate-950/42')
+                      ? 'bg-[linear-gradient(180deg,rgba(0,0,0,0.3)_0%,rgba(0,0,0,0.56)_56%,rgba(0,0,0,0.82)_100%)]'
+                      : 'bg-[linear-gradient(180deg,rgba(0,0,0,0.22)_0%,rgba(0,0,0,0.5)_56%,rgba(0,0,0,0.76)_100%)]')
                   } />
                   <div className="relative flex h-full flex-col justify-between">
                     <div>

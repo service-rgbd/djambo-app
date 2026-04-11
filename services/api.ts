@@ -31,6 +31,22 @@ export type CustomerSummary = {
   totalSpent: number;
   lastActivityAt: string | null;
   preferredVehicle: string | null;
+  interestType: 'RENT' | 'BUY' | null;
+};
+
+export type CreateCustomerPayload = {
+  fullName: string;
+  email: string;
+  phone: string;
+  interestType: 'RENT' | 'BUY';
+};
+
+export type RegisteredCustomerCandidate = {
+  id: string;
+  fullName: string;
+  email: string;
+  phone: string;
+  linkedToCurrentOwner: boolean;
 };
 
 export type OwnerVehicleSummary = {
@@ -479,6 +495,25 @@ const normalizeLegacyVehicle = (vehicle: typeof legacyMarketplaceVehicles[number
   conditions: vehicle.conditions,
 });
 
+const mergeVehicleWithLegacyImages = (
+  apiVehicle: MarketplacePublicVehicle,
+  legacyVehicle: MarketplacePublicVehicle,
+): MarketplacePublicVehicle => ({
+  ...apiVehicle,
+  ownerProfile: {
+    ...apiVehicle.ownerProfile,
+    type: apiVehicle.ownerProfile.type || legacyVehicle.ownerProfile.type,
+    storeSlug: apiVehicle.ownerProfile.storeSlug || legacyVehicle.ownerProfile.storeSlug,
+  },
+  images: legacyVehicle.images.length > 0 ? legacyVehicle.images : apiVehicle.images,
+});
+
+const legacyMarketplaceVehicleIds = new Set(legacyMarketplaceVehicles.map((vehicle) => vehicle.id));
+
+export const isLegacyMarketplaceVehicleId = (vehicleId: string) => legacyMarketplaceVehicleIds.has(vehicleId);
+
+export const isRealUserMarketplaceVehicle = (vehicle: Pick<MarketplacePublicVehicle, 'id'>) => !isLegacyMarketplaceVehicleId(vehicle.id);
+
 const normalizeLegacyReview = (review: typeof legacyMarketplaceReviews[number]): MarketplacePublicReview => ({
   id: review.id,
   userId: review.userId,
@@ -499,7 +534,10 @@ const mergeMarketplaceVehicles = (apiVehicles: MarketplacePublicVehicle[]): Mark
     vehiclesById.set(vehicle.id, vehicle);
   });
 
-  const merged: MarketplacePublicVehicle[] = legacyVehicles.map((vehicle) => vehiclesById.get(vehicle.id) || vehicle);
+  const merged: MarketplacePublicVehicle[] = legacyVehicles.map((vehicle) => {
+    const apiVehicle = vehiclesById.get(vehicle.id);
+    return apiVehicle ? mergeVehicleWithLegacyImages(apiVehicle, vehicle) : vehicle;
+  });
   const mergedIds = new Set(merged.map((vehicle) => vehicle.id));
 
   apiVehicles.forEach((vehicle) => {
@@ -636,6 +674,11 @@ export const api = {
     body: JSON.stringify(payload),
   }),
   getCustomers: () => apiRequest<CustomerSummary[]>('/api/customers'),
+  searchRegisteredCustomers: (query = '') => apiRequest<RegisteredCustomerCandidate[]>(`/api/customers/registered-users?query=${encodeURIComponent(query)}`),
+  createCustomer: (payload: CreateCustomerPayload) => apiRequest<CustomerSummary>('/api/customers', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
   getPrivateSettings: () => apiRequest<PrivateAppSettings>('/api/settings'),
   updatePrivateSettings: (payload: PrivateAppSettings) => apiRequest<PrivateAppSettings>('/api/settings', {
     method: 'PUT',
@@ -716,8 +759,11 @@ export const api = {
   getMarketplaceVehicleById: async (vehicleId: string) => {
     try {
       const payload = await apiRequest<MarketplaceVehicleDetailResponse>(`/api/marketplace/vehicles/${vehicleId}`);
+      const legacyVehicle = findMarketplaceVehicleById(payload.vehicle.id);
+      const normalizedLegacyVehicle = legacyVehicle ? normalizeLegacyVehicle(legacyVehicle) : null;
+
       return {
-        vehicle: payload.vehicle,
+        vehicle: normalizedLegacyVehicle ? mergeVehicleWithLegacyImages(payload.vehicle, normalizedLegacyVehicle) : payload.vehicle,
         reviews: mergeMarketplaceReviews(payload.reviews, undefined, payload.vehicle.id),
         relatedVehicles: mergeMarketplaceVehicles(payload.relatedVehicles),
       };

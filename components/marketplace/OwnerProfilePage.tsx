@@ -6,7 +6,7 @@ import {
 } from 'lucide-react';
 import { BrandLogo } from '../../components/BrandLogo';
 import { PublicSiteHeader } from '../../components/PublicSiteHeader';
-import { ownerProfiles, marketplaceVehicles, reviews } from '../../services/mockData';
+import { api, MarketplaceOwnerDetailResponse } from '../../services/api';
 
 const StarRating = ({ rating, size = 14 }: { rating: number; size?: number }) => (
   <div className="flex items-center gap-0.5">
@@ -21,17 +21,60 @@ export const OwnerProfilePage: React.FC = () => {
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = React.useState(false);
   const [activeLanguage, setActiveLanguage] = React.useState('FR');
+  const [data, setData] = React.useState<MarketplaceOwnerDetailResponse | null>(null);
+  const [loading, setLoading] = React.useState(true);
+  const [error, setError] = React.useState('');
 
-  const profile = ownerProfiles.find(p => p.id === profileId);
-  const ownerVehicles = marketplaceVehicles.filter(v => v.ownerId === profileId);
-  const ownerReviews = reviews.filter(r => r.ownerId === profileId);
+  React.useEffect(() => {
+    let isMounted = true;
+
+    const loadOwnerProfile = async () => {
+      if (!profileId) {
+        setLoading(false);
+        return;
+      }
+
+      try {
+        setLoading(true);
+        const response = await api.getMarketplaceOwnerById(profileId);
+        if (!isMounted) {
+          return;
+        }
+        setData(response);
+        setError('');
+      } catch (loadError) {
+        if (!isMounted) {
+          return;
+        }
+        setError(loadError instanceof Error ? loadError.message : 'Profil introuvable.');
+      } finally {
+        if (isMounted) {
+          setLoading(false);
+        }
+      }
+    };
+
+    void loadOwnerProfile();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [profileId]);
+
+  const profile = data?.ownerProfile;
+  const ownerVehicles = data?.vehicles ?? [];
+  const ownerReviews = data?.reviews ?? [];
+
+  if (loading) {
+    return <div className="min-h-screen bg-slate-50 flex items-center justify-center text-slate-500">Chargement du profil...</div>;
+  }
 
   if (!profile) {
     return (
       <div className="min-h-screen bg-slate-50 flex items-center justify-center">
         <div className="text-center">
-          <p className="text-slate-500 mb-4">Profil introuvable.</p>
-          <button onClick={() => navigate('/vehicles')} className="text-indigo-600 font-semibold">
+          <p className="text-slate-500 mb-4">{error || 'Profil introuvable.'}</p>
+          <button onClick={() => navigate('/vehicles')} className="inline-flex items-center gap-2 border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-50">
             Retour a la recherche
           </button>
         </div>
@@ -50,7 +93,6 @@ export const OwnerProfilePage: React.FC = () => {
         navLinks={[{ label: 'Accueil', to: '/' }, { label: 'La flotte', to: '/vehicles' }, { label: 'OK Help', to: '#top' }]}
         activeLanguage={activeLanguage}
         onLanguageChange={setActiveLanguage}
-        subtitle="L'app FleetCommand"
       />
 
       {/* Header nav */}
@@ -58,11 +100,11 @@ export const OwnerProfilePage: React.FC = () => {
         <div className="max-w-5xl mx-auto px-4 py-4 pt-20 flex items-center gap-3">
           <button
             onClick={() => navigate(-1)}
-            className="flex items-center gap-1.5 text-slate-600 hover:text-slate-900 font-medium text-sm"
+            className="inline-flex items-center gap-1.5 border border-slate-200 bg-white px-3 py-2 text-slate-600 hover:text-slate-900 hover:bg-slate-50 font-medium text-sm transition-colors"
           >
             <ChevronLeft size={18} /> Retour
           </button>
-          <BrandLogo size="sm" subtitle="L'app FleetCommand" />
+          <BrandLogo size="sm" useFullLogo />
         </div>
       </div>
 
@@ -256,7 +298,7 @@ export const OwnerProfilePage: React.FC = () => {
             <div className="mt-4 bg-indigo-50 border border-indigo-100 rounded-2xl p-4">
               <div className="flex items-center gap-2 text-indigo-800 font-semibold text-sm mb-2">
                 <CheckCircle2 size={15} className="text-indigo-600" />
-                FleetCommand garantit
+                Djambo garantit
               </div>
               <ul className="space-y-1.5 text-xs text-indigo-700">
                 <li>Profils verifies par notre equipe</li>

@@ -1,27 +1,24 @@
-import React, { useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link, useNavigate } from 'react-router-dom';
 import {
   ArrowRight,
-  BadgeCheck,
-  Building2,
-  CalendarDays,
-  Car,
   CheckCircle2,
+  Car,
+  ChevronLeft,
   ChevronRight,
-  Clock3,
   Globe,
   Headphones,
   MapPin,
-  Menu,
+  Pause,
+  Play,
   Search,
   Shield,
-  SlidersHorizontal,
   Sparkles,
-  Star,
   Users,
 } from 'lucide-react';
 import { BrandLogo } from '../../components/BrandLogo';
 import { PublicSiteHeader } from '../../components/PublicSiteHeader';
+import { HeroBlock } from './HeroBlock';
 import { marketplaceVehicles } from '../../services/mockData';
 import { VehicleCategory } from '../../types';
 
@@ -33,41 +30,17 @@ const CATEGORIES = [
   { label: 'Pick-up', value: VehicleCategory.PICKUP },
   { label: 'Utilitaire', value: VehicleCategory.UTILITAIRE },
 ];
-
-const LANGUAGES = ['ES', 'EN', 'DE', 'FR', 'IT', 'PT'];
-const BRANDS = ['Toyota', 'Mercedes', 'BMW', 'Range Rover', 'Porsche', 'Audi', 'Volkswagen', 'Honda'];
-const HERO_IMAGE_SRC = new URL('../../login-images.jpg', import.meta.url).href;
-const HERO_VIDEO_SRC = '/media/0_Business_Meeting_3840x2160.mp4';
-
-const StarRow = ({ rating, count }: { rating: number; count: number }) => (
-  <div className="flex items-center gap-1.5">
-    <div className="flex items-center gap-0.5">
-      {[1, 2, 3, 4, 5].map((star) => (
-        <Star
-          key={star}
-          size={12}
-          className={star <= Math.round(rating) ? 'text-amber-400 fill-amber-400' : 'text-slate-300 fill-slate-300'}
-        />
-      ))}
-    </div>
-    <span className="text-xs font-bold text-slate-700">{rating.toFixed(1)}</span>
-    <span className="text-xs text-slate-400">({count})</span>
-  </div>
-);
+const CONTRACT_ILLUSTRATION_SRC = new URL('../../ullustrqtionsectioncontrat.jpg', import.meta.url).href;
+const COCODY_RIVIERA_SCENE_SRC = new URL('../../VILLE, RESIDENCE, RENDEZ-VOUS Djambo Cocody Riviera .jpeg', import.meta.url).href;
 
 export const LandingPage: React.FC = () => {
   const navigate = useNavigate();
-  const [city, setCity] = useState('Dakar');
+  const fleetScrollRef = useRef<HTMLDivElement | null>(null);
+  const [selectedFleetVehicleId, setSelectedFleetVehicleId] = useState<string | null>(null);
+  const [city, setCity] = useState('');
   const [type, setType] = useState('');
-  const [pickupDate, setPickupDate] = useState('2026-04-12');
-  const [returnDate, setReturnDate] = useState('2026-04-15');
-  const [pickupTime, setPickupTime] = useState('10:00');
-  const [returnTime, setReturnTime] = useState('10:00');
-  const [returnDifferent, setReturnDifferent] = useState(false);
-  const [ageConfirmed, setAgeConfirmed] = useState(true);
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeLanguage, setActiveLanguage] = useState('FR');
-  const [heroVideoReady, setHeroVideoReady] = useState(true);
 
   const featuredVehicles = useMemo(
     () => marketplaceVehicles.filter((vehicle) => vehicle.isAvailable).slice(0, 6),
@@ -75,32 +48,140 @@ export const LandingPage: React.FC = () => {
   );
 
   const uniqueCities = useMemo(() => [...new Set(marketplaceVehicles.map((vehicle) => vehicle.city))], []);
+  const rollingFleet = useMemo(() => [...featuredVehicles, ...featuredVehicles, ...featuredVehicles], [featuredVehicles]);
+  const isFleetPaused = Boolean(selectedFleetVehicleId);
+  const fleetCenterStartIndex = featuredVehicles.length;
+  const heroSpotlightVehicle = useMemo(() => {
+    const scopedVehicles = city ? marketplaceVehicles.filter((vehicle) => vehicle.city === city) : marketplaceVehicles;
+    const categoryVehicles = type ? scopedVehicles.filter((vehicle) => vehicle.category === type) : scopedVehicles;
+    return (categoryVehicles[0] ?? scopedVehicles[0] ?? marketplaceVehicles[0]);
+  }, [city, type]);
+
+  useEffect(() => {
+    const container = fleetScrollRef.current;
+    if (!container || featuredVehicles.length === 0) {
+      return;
+    }
+
+    container.scrollLeft = container.scrollWidth / 3;
+  }, [featuredVehicles.length]);
+
+  useEffect(() => {
+    const container = fleetScrollRef.current;
+    if (!container || featuredVehicles.length === 0 || isFleetPaused) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      const singleLoopWidth = container.scrollWidth / 3;
+      const nextLeft = container.scrollLeft + 324;
+
+      if (nextLeft >= singleLoopWidth * 2) {
+        container.scrollTo({ left: singleLoopWidth, behavior: 'auto' });
+        return;
+      }
+
+      container.scrollTo({ left: nextLeft, behavior: 'smooth' });
+    }, 2800);
+
+    return () => window.clearInterval(intervalId);
+  }, [featuredVehicles.length, isFleetPaused]);
+
+  const shiftFleet = (direction: 'previous' | 'next') => {
+    const container = fleetScrollRef.current;
+    if (!container) {
+      return;
+    }
+
+    const singleLoopWidth = container.scrollWidth / 3;
+    const offset = direction === 'next' ? 324 : -324;
+    let targetLeft = container.scrollLeft + offset;
+
+    if (targetLeft >= singleLoopWidth * 2 || targetLeft <= 0) {
+      targetLeft = singleLoopWidth;
+    }
+
+    container.scrollTo({ left: targetLeft, behavior: 'smooth' });
+  };
 
   const destinationCards = [
-    'FleetCommand Dakar Aeroport',
-    'FleetCommand Dakar Almadies',
-    'FleetCommand Abidjan Aeroport',
-    'FleetCommand Cocody Riviera',
-    'FleetCommand Bamako Centre',
-    'FleetCommand Plateau Business Lounge',
+    {
+      title: 'Djambo Dakar Aeroport',
+      subtitle: 'Arrivees et departs fluides',
+      detail: 'Retrait premium, accueil prioritaire et restitution coordonnee selon votre vol.',
+      image: featuredVehicles[0]?.images[0]?.url,
+      points: ['Voiturier disponible', 'Suivi vol', 'Remise rapide'],
+    },
+    {
+      title: 'Djambo Dakar Almadies',
+      subtitle: 'Business et sejours prives',
+      detail: 'Point de remise adapte aux sejours executives, rendez-vous et locations image.',
+      image: featuredVehicles[1]?.images[0]?.url,
+      points: ['Quartier premium', 'Livraison hotel', 'Support concierge'],
+    },
+    {
+      title: 'Djambo Abidjan Aeroport',
+      subtitle: 'Accueil corporate',
+      detail: 'Prise en charge soignee pour les deplacements rapides et les agendas serres.',
+      image: featuredVehicles[2]?.images[0]?.url,
+      points: ['Coordination agent', 'Sortie rapide', 'Canal prioritaire'],
+    },
+    {
+      title: 'Djambo Cocody Riviera',
+      subtitle: 'Ville, residence, rendez-vous',
+      detail: 'Point plus discret pour une remise confortable dans un cadre residentiel premium.',
+      image: COCODY_RIVIERA_SCENE_SRC,
+      points: ['Cadre calme', 'Retrait flexible', 'Flotte selective'],
+    },
+    {
+      title: 'Djambo Bamako Centre',
+      subtitle: 'Mobilite executive',
+      detail: 'Une base centrale pour organiser rapidement vos departs et restitutions en ville.',
+      image: featuredVehicles[4]?.images[0]?.url,
+      points: ['Centre acces direct', 'Contact rapide', 'Service accompagne'],
+    },
+    {
+      title: 'Djambo Plateau Business Lounge',
+      subtitle: 'Format lounge et reception',
+      detail: 'Presentation plus exclusive pour les profils qui attendent davantage qu un simple comptoir.',
+      image: featuredVehicles[5]?.images[0]?.url || featuredVehicles[0]?.images[0]?.url,
+      points: ['Lounge dedie', 'Attente confortable', 'Remise soignee'],
+    },
   ];
 
   const premiumPromises = [
     {
-      title: '100% marques premium',
-      description: 'Une flotte volontairement courte, plus selective, composee de modeles fiables, desirables et verifies.',
+      title: 'Flotte courte, desirabilite forte',
+      description: 'Chaque selection doit deja donner envie avant meme l ouverture de la fiche.',
       icon: Sparkles,
+      metric: 'Selection courte',
+      image: featuredVehicles[0]?.images[0]?.url,
+      accent: 'Modeles image et verifies',
     },
     {
-      title: 'Tarifs complets et lisibles',
-      description: 'Assistance, couverture et informations essentielles mises en avant avant la demande de reservation.',
+      title: 'Conditions visibles des le premier regard',
+      description: 'Le visiteur doit comprendre le niveau de service sans lire de longs paragraphes.',
       icon: Shield,
+      metric: 'Lecture immediate',
+      image: CONTRACT_ILLUSTRATION_SRC,
+      accent: 'Tarif, remise, couverture',
     },
     {
-      title: 'Service concierge personnalise',
-      description: 'Livraison, restitution, accompagnement prioritaire et proprietaires mieux qualifies pour une experience fluide.',
+      title: 'Service accompagne et points de remise mieux tenus',
+      description: 'La promesse doit sembler concrete grace aux lieux, aux images et au ton du service.',
       icon: Headphones,
+      metric: 'Accompagnement humain',
+      image: featuredVehicles[1]?.images[0]?.url,
+      accent: 'Livraison, restitution, suivi',
     },
+  ];
+
+  const keyFacts = [
+    { title: 'Reservation directe', description: 'Acces rapide a la flotte sans parcours charge.', icon: ArrowRight, label: 'Parcours rapide' },
+    { title: 'Vehicules premium', description: 'Selection orientee image, confort et disponibilite.', icon: Car, label: 'Flotte qualifiee' },
+    { title: 'Remise soignee', description: 'Points de retrait mieux tenus et plus lisibles.', icon: MapPin, label: 'Points de remise' },
+    { title: 'Support humain', description: 'Assistance claire avant, pendant et apres la location.', icon: Headphones, label: 'Accompagnement' },
+    { title: 'Lecture simple', description: 'Tarifs, categories et usages visibles en quelques secondes.', icon: Search, label: 'Lecture immediate' },
   ];
 
   const editorialCards = [
@@ -119,9 +200,22 @@ export const LandingPage: React.FC = () => {
   ];
 
   const navLinks = [
-    { label: 'La flotte', to: '/vehicles' },
-    { label: 'Destinations', to: '#destinations' },
-    { label: 'OK Help', to: '#help' },
+    {
+      label: 'Explorer',
+      items: [
+        { label: 'Benefices', to: '#benefices', description: 'Les raisons de choisir la plateforme avant de commencer la recherche.', previewImage: featuredVehicles[0]?.images[0]?.url, previewMeta: 'Vehicule libre', previewTitle: 'Les avantages doivent se voir avant de se lire.' },
+        { label: 'Presentation de la flotte', to: '#fleet', description: 'Une vitrine plus claire pour comparer rapidement les meilleurs modeles.', previewImage: featuredVehicles[1]?.images[0]?.url, previewMeta: 'Vehicule libre', previewTitle: 'Une flotte mise en scene comme un vrai catalogue.' },
+        { label: 'Toutes les voitures', to: '/vehicles', description: 'Acceder directement au catalogue complet.', previewImage: featuredVehicles[2]?.images[0]?.url, previewMeta: 'Catalogue vehicules', previewTitle: 'Entrer directement dans la collection Djambo.' },
+      ],
+    },
+    {
+      label: 'Services',
+      items: [
+        { label: 'Destinations', to: '#destinations', description: 'Points de retrait premium et zones actives.', previewMeta: 'Parc auto', previewTitle: 'Des points de remise mieux tenus et plus exclusifs.' },
+        { label: 'Conciergerie', to: '#help', description: 'Livraison, assistance et restitution accompagnee.', previewMeta: 'Service humain', previewTitle: 'Une experience mieux encadree de bout en bout.' },
+      ],
+    },
+    { label: 'Tarifs', to: '/pricing' },
   ];
 
   const handleSearch = (event: React.FormEvent) => {
@@ -132,296 +226,155 @@ export const LandingPage: React.FC = () => {
     navigate('/vehicles?' + params.toString());
   };
 
+  const fleetHref = `/vehicles?${new URLSearchParams({
+    ...(city ? { city } : {}),
+    ...(type ? { category: type } : {}),
+  }).toString()}`;
+
   return (
     <div className="min-h-screen bg-[#f7f5f0] text-slate-900 font-sans">
       <PublicSiteHeader
-        theme="dark"
+        theme="light"
         mobileMenuOpen={mobileMenuOpen}
         onToggleMobileMenu={() => setMobileMenuOpen((value) => !value)}
         navLinks={navLinks}
         activeLanguage={activeLanguage}
         onLanguageChange={setActiveLanguage}
-        subtitle="L'app FleetCommand"
       />
 
-      <section className="relative overflow-hidden bg-slate-950 pt-24 text-white">
+      <section className="relative overflow-hidden bg-[#f7f5f0] pt-24">
         <div className="absolute inset-0">
-          {heroVideoReady ? (
-            <video
-              className="w-full h-full object-cover scale-[1.03]"
-              autoPlay
-              muted
-              loop
-              playsInline
-              onError={() => setHeroVideoReady(false)}
-            >
-              <source src={HERO_VIDEO_SRC} type="video/mp4" />
-            </video>
-          ) : HERO_IMAGE_SRC ? (
-            <img
-              src={HERO_IMAGE_SRC}
-              alt="Presentation premium FleetCommand"
-              className="w-full h-full object-cover scale-[1.03]"
-            />
-          ) : (
-            <div className="h-full w-full bg-[radial-gradient(circle_at_top,#334155_0%,#0f172a_45%,#020617_100%)]" />
-          )}
-          <div className="absolute inset-0 bg-gradient-to-b from-slate-950/18 via-slate-950/38 to-[#f7f5f0]" />
-          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(255,255,255,0.12),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(99,102,241,0.18),transparent_30%)]" />
-          <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(rgba(255,255,255,0.7) 1px, transparent 1px), linear-gradient(90deg, rgba(255,255,255,0.7) 1px, transparent 1px)', backgroundSize: '72px 72px' }} />
+          <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(201,171,114,0.18),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(99,102,241,0.08),transparent_24%)]" />
+          <div className="absolute inset-0 opacity-[0.03]" style={{ backgroundImage: 'linear-gradient(rgba(15,23,42,0.8) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.8) 1px, transparent 1px)', backgroundSize: '72px 72px' }} />
         </div>
 
-        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-14 sm:pb-16">
-          <div className="grid lg:grid-cols-[1.1fr_0.9fr] gap-8 lg:gap-10 items-end min-h-[680px] lg:min-h-[760px] pt-6 sm:pt-8">
-            <div className="max-w-2xl pt-6 sm:pt-10 lg:pt-20">
-              <div className="inline-flex items-center gap-2 rounded-full border border-white/15 bg-white/5 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-200 mb-6">
-                <Sparkles size={12} className="text-amber-300" />
-                Conduisez une nouvelle experience
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 pb-10 sm:pb-14">
+          <div className="grid gap-8 lg:grid-cols-[0.96fr_1.04fr] items-start pt-6 sm:pt-8">
+            <div className="max-w-2xl pt-4 sm:pt-8 lg:pt-10">
+              <div className="inline-flex items-center gap-2 border border-slate-200 bg-white/75 px-3 py-1.5 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-700 mb-5 sm:mb-6 backdrop-blur-sm">
+                <Sparkles size={12} className="text-amber-600" />
+                Location premium simplifiee
               </div>
 
-              <p className="text-sm text-slate-300 mb-4">La flotte la plus selective avec les tarifs les plus complets.</p>
-
-              <h1 className="text-3xl sm:text-5xl lg:text-7xl font-extrabold tracking-tight leading-[0.95] mb-5 sm:mb-6">
-                <span className="text-white">100%</span>{' '}
-                <span className="text-amber-300">marques premium</span>
-                <br />
-                <span className="text-white">et</span>{' '}
-                <span className="text-indigo-300">modeles garantis</span>
+              <h1 className="text-3xl sm:text-5xl lg:text-[3.55rem] font-extrabold tracking-tight leading-[0.98] mb-4 max-w-[12ch] sm:max-w-[13ch] lg:max-w-none text-slate-950">
+                Trouvez la bonne voiture, plus vite.
               </h1>
 
-              <p className="text-sm sm:text-lg text-slate-300 max-w-xl leading-relaxed mb-6 sm:mb-8">
-                Une presentation editorialisee pour les voyageurs et dirigeants qui veulent davantage qu'une simple location: plus de transparence, plus de service, plus de desirabilite.
+              <p className="text-sm sm:text-lg text-slate-600 max-w-xl leading-relaxed">
+                Djambo vous donne un accès simple à une flotte bien présentée, des modèles premium et une réservation plus fluide dès les premiers instants.
               </p>
 
-              <div className="flex flex-wrap gap-2.5 sm:gap-3 mb-6 sm:mb-8">
-                {['Dakar', 'Abidjan', 'Bamako', 'Plateau', 'Almadies'].map((label) => (
-                  <span key={label} className="rounded-full border border-white/10 bg-white/5 px-4 py-2 text-sm font-medium text-slate-200">
-                    {label}
-                  </span>
-                ))}
-              </div>
-
-              <div className="grid sm:grid-cols-3 gap-3 max-w-xl">
-                {[
-                  { value: '100%', label: 'premium' },
-                  { value: '48 h', label: 'minimum pour delivery' },
-                  { value: uniqueCities.length + '+', label: 'destinations actives' },
-                ].map((stat) => (
-                  <div key={stat.label} className="rounded-2xl border border-white/10 bg-white/5 p-4 backdrop-blur-sm">
-                    <p className="text-2xl font-extrabold text-white">{stat.value}</p>
-                    <p className="text-xs uppercase tracking-[0.18em] text-slate-400 mt-1">{stat.label}</p>
-                  </div>
-                ))}
+              <div className="mt-8 flex flex-col gap-3 sm:flex-row">
+                <Link to={fleetHref} className="inline-flex min-h-[54px] items-center justify-center gap-2 bg-slate-950 px-6 py-3 text-sm font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-slate-800">
+                  Voir la flotte
+                  <ArrowRight size={16} />
+                </Link>
+                <a href="#benefices" className="inline-flex min-h-[54px] items-center justify-center border border-slate-200 bg-white px-6 py-3 text-sm font-bold uppercase tracking-[0.14em] text-slate-800 transition-colors hover:bg-slate-50">
+                  Comprendre le service
+                </a>
               </div>
             </div>
 
-            <div className="relative lg:pb-8">
-              <form onSubmit={handleSearch} className="rounded-[24px] sm:rounded-[28px] border border-white/10 bg-white text-slate-900 shadow-[0_32px_120px_rgba(2,6,23,0.45)] overflow-hidden">
-                <div className="border-b border-slate-200 px-4 sm:px-6 py-4 sm:py-5">
-                  <div className="flex items-center justify-between gap-4 flex-wrap">
-                    <div>
-                      <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Recherche premium</p>
-                      <h2 className="text-xl sm:text-2xl font-extrabold text-slate-900 mt-1">Reservez en un seul module</h2>
-                    </div>
-                    <div className="inline-flex items-center gap-2 rounded-full bg-slate-100 px-3 py-1 text-xs font-semibold text-slate-600">
-                      <BadgeCheck size={12} className="text-emerald-600" />
-                      Couverture et conditions visibles
-                    </div>
-                  </div>
-                </div>
-
-                <div className="p-4 sm:p-6 grid sm:grid-cols-2 gap-3 sm:gap-4">
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4">
-                    <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Store depart</label>
-                    <div className="mt-2 flex items-center gap-2 text-slate-800">
-                      <MapPin size={16} className="text-indigo-600" />
-                      <select value={city} onChange={(e) => setCity(e.target.value)} className="w-full bg-transparent outline-none text-sm font-semibold">
-                        {uniqueCities.map((value) => (
-                          <option key={value} value={value}>{value}</option>
-                        ))}
-                      </select>
-                    </div>
+            <div className="relative mt-2 lg:mt-0">
+              <article className="overflow-hidden border border-slate-200 bg-white p-4 shadow-[0_24px_60px_rgba(15,23,42,0.08)]">
+                <div className="grid gap-4 lg:grid-cols-[1.15fr_0.85fr]">
+                  <div className="relative min-h-[260px] overflow-hidden bg-slate-100">
+                    <img src={heroSpotlightVehicle.images[0]?.url ?? COCODY_RIVIERA_SCENE_SRC} alt={heroSpotlightVehicle.title} className="h-full w-full object-cover" />
+                    <HeroBlock
+                      variant="light"
+                      overlayClassName="bg-[linear-gradient(180deg,rgba(0,0,0,0.08)_0%,rgba(0,0,0,0.2)_42%,rgba(0,0,0,0.62)_100%)]"
+                    >
+                      <div className="absolute left-4 top-4 bg-white/92 px-3 py-1.5 text-[10px] font-bold uppercase tracking-[0.18em] text-slate-900">
+                        Selection du moment
+                      </div>
+                      <div className="absolute inset-x-4 bottom-4 rounded-2xl border border-white/10 bg-[linear-gradient(180deg,rgba(2,6,23,0.2)_0%,rgba(2,6,23,0.34)_100%)] p-4">
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/72">{heroSpotlightVehicle.city}</p>
+                        <p className="mt-2 text-lg font-extrabold text-white">{heroSpotlightVehicle.title}</p>
+                        <p className="mt-2 text-sm text-white/84">{heroSpotlightVehicle.pricePerDay.toLocaleString()} FCFA par jour</p>
+                      </div>
+                    </HeroBlock>
                   </div>
 
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4">
-                    <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Store retour</label>
-                    <div className="mt-2 flex items-center gap-2 text-slate-800">
-                      <Building2 size={16} className="text-indigo-600" />
-                      <span className="text-sm font-semibold">{returnDifferent ? 'Selection personnalisee' : city}</span>
-                    </div>
-                    <button type="button" onClick={() => setReturnDifferent((value) => !value)} className="mt-3 text-xs font-semibold text-indigo-600 hover:text-indigo-500">
-                      {returnDifferent ? 'Restitution identique' : 'Differente restitution'}
-                    </button>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-3.5 sm:p-4">
-                    <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Depart</label>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 border border-slate-200">
-                        <CalendarDays size={15} className="text-indigo-600" />
-                        <input type="date" value={pickupDate} onChange={(e) => setPickupDate(e.target.value)} className="w-full bg-transparent outline-none text-sm" />
-                      </div>
-                      <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 border border-slate-200">
-                        <Clock3 size={15} className="text-indigo-600" />
-                        <input type="time" value={pickupTime} onChange={(e) => setPickupTime(e.target.value)} className="w-full bg-transparent outline-none text-sm" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4">
-                    <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Retour</label>
-                    <div className="mt-2 grid grid-cols-2 gap-2">
-                      <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 border border-slate-200">
-                        <CalendarDays size={15} className="text-indigo-600" />
-                        <input type="date" value={returnDate} onChange={(e) => setReturnDate(e.target.value)} className="w-full bg-transparent outline-none text-sm" />
-                      </div>
-                      <div className="flex items-center gap-2 rounded-xl bg-white px-3 py-2 border border-slate-200">
-                        <Clock3 size={15} className="text-indigo-600" />
-                        <input type="time" value={returnTime} onChange={(e) => setReturnTime(e.target.value)} className="w-full bg-transparent outline-none text-sm" />
-                      </div>
-                    </div>
-                  </div>
-
-                  <div className="rounded-2xl border border-slate-200 bg-slate-50 p-4 sm:col-span-2">
-                    <div className="flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                      <div className="flex items-center gap-3">
-                        <input id="ageConfirmed" type="checkbox" checked={ageConfirmed} onChange={(e) => setAgeConfirmed(e.target.checked)} className="h-4 w-4 rounded border-slate-300 text-indigo-600 focus:ring-indigo-500" />
-                        <label htmlFor="ageConfirmed" className="text-sm font-semibold text-slate-700">26 ans ou plus</label>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <label className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400">Type</label>
-                        <select value={type} onChange={(e) => setType(e.target.value)} className="rounded-xl border border-slate-200 bg-white px-3 py-2 text-sm font-semibold outline-none focus:border-indigo-500">
-                          <option value="">Tous les segments</option>
-                          {CATEGORIES.map((category) => (
-                            <option key={category.value} value={category.value}>{category.label}</option>
+                  <div className="grid content-start gap-3">
+                    <div className="border border-slate-200 bg-[#fbfaf7] p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Ville</p>
+                      <div className="mt-2 flex items-center gap-2 text-slate-800">
+                        <MapPin size={16} className="text-indigo-600" />
+                        <select value={city} onChange={(e) => setCity(e.target.value)} className="w-full bg-transparent outline-none text-sm font-semibold">
+                          <option value="">Toutes les villes</option>
+                          {uniqueCities.map((value) => (
+                            <option key={value} value={value}>{value}</option>
                           ))}
                         </select>
                       </div>
                     </div>
-                  </div>
-                </div>
 
-                <div className="border-t border-slate-200 bg-slate-50 px-6 py-5 flex flex-col md:flex-row md:items-center md:justify-between gap-4">
-                  <div>
-                    <p className="text-xs font-semibold uppercase tracking-[0.18em] text-slate-400 mb-1">Delivery</p>
-                    <p className="text-sm text-slate-600 max-w-xl">
-                      Service de livraison et de restitution personnalise. L'option se finalise sur la page des extras avec 48 h d'anticipation conseillees.
+                    <div className="border border-slate-200 bg-[#fbfaf7] p-4">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Segment</p>
+                      <select value={type} onChange={(e) => setType(e.target.value)} className="mt-2 w-full bg-transparent outline-none text-sm font-semibold text-slate-800">
+                        <option value="">Tous les segments</option>
+                        {CATEGORIES.map((category) => (
+                          <option key={category.value} value={category.value}>{category.label}</option>
+                        ))}
+                      </select>
+                    </div>
+
+                    <Link to={fleetHref} className="inline-flex min-h-[52px] items-center justify-center gap-2 bg-slate-950 px-4 py-3 text-sm font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-slate-800">
+                      Ouvrir la flotte
+                      <ArrowRight size={16} />
+                    </Link>
+                    <p className="px-1 text-xs leading-relaxed text-slate-500">
+                      Par defaut, toute la flotte reste visible. Affinez ensuite par ville ou par segment.
                     </p>
                   </div>
-                  <button type="submit" className="inline-flex items-center justify-center gap-2 rounded-2xl bg-slate-950 px-6 py-4 text-sm font-bold uppercase tracking-[0.16em] text-white hover:bg-indigo-700 transition-colors">
-                    Chercher
-                    <ArrowRight size={16} />
-                  </button>
                 </div>
-              </form>
+              </article>
             </div>
           </div>
         </div>
       </section>
 
-      <section className="border-y border-slate-200 bg-white/80 backdrop-blur-sm">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-5">
-          <div className="flex flex-wrap items-center gap-x-6 gap-y-3 text-sm font-semibold text-slate-500">
-            <span className="text-xs uppercase tracking-[0.22em] text-slate-400">Marques partenaires</span>
-            {BRANDS.map((brand) => (
-              <span key={brand} className="text-slate-700">{brand}</span>
-            ))}
-          </div>
-        </div>
-      </section>
-
-      <section className="py-20 bg-[#f7f5f0]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-[0.9fr_1.1fr] gap-12 items-start">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-3">Arguments centraux</p>
-              <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 leading-tight mb-4">
-                Les benefices d'abord, les details ensuite.
-              </h2>
-              <p className="text-slate-600 leading-relaxed max-w-md">
-                Cette presentation ne cherche pas le volume. Elle cherche la confiance, la clarte tarifaire et le desir d'une experience plus exclusive.
-              </p>
-            </div>
-            <div className="grid md:grid-cols-3 gap-4">
-              {premiumPromises.map(({ title, description, icon: Icon }) => (
-                <div key={title} className="rounded-[28px] border border-slate-200 bg-white p-6 shadow-sm hover:shadow-md transition-shadow">
-                  <div className="w-12 h-12 rounded-2xl bg-slate-950 text-white flex items-center justify-center mb-4">
-                    <Icon size={18} />
-                  </div>
-                  <h3 className="text-lg font-extrabold text-slate-900 mb-2">{title}</h3>
-                  <p className="text-sm text-slate-600 leading-relaxed">{description}</p>
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
-      </section>
-
-      <section className="py-20 bg-white">
+      <section id="benefices" className="py-16 bg-[#f7f5f0]">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
           <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 mb-8">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-3">La flotte la plus selective</p>
-              <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900">Modeles garantis, couverture visible, positionnement premium.</h2>
-              <p className="text-slate-600 mt-3 max-w-2xl">
-                Chaque carte insiste sur ce qui compte vraiment: le modele, les garanties, la couverture incluse et un prix lisible des le premier regard.
+            <div className="max-w-2xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-3">Arguments centraux</p>
+              <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 leading-tight mb-4">
+                Montrer d abord la qualite du service, puis seulement demander une recherche.
+              </h2>
+              <p className="text-slate-600 leading-relaxed">
+                Ici, chaque bloc doit faire comprendre en quelques secondes ce que le visiteur gagne vraiment en passant par Djambo.
               </p>
             </div>
-            <div className="flex items-center gap-3">
-              <button type="button" className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 px-4 py-3 text-sm font-semibold text-slate-700 bg-slate-50">
-                <SlidersHorizontal size={16} />
-                Filtres
-              </button>
-              <Link to="/vehicles" className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-3 text-sm font-semibold text-white hover:bg-indigo-700 transition-colors">
-                Voir la flotte
-                <ChevronRight size={16} />
-              </Link>
-            </div>
+            <Link to="/vehicles" className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700 hover:text-slate-950 transition-colors w-fit">
+              Explorer la collection
+              <ChevronRight size={16} />
+            </Link>
           </div>
 
-          <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-            {featuredVehicles.map((vehicle) => (
-              <article
-                key={vehicle.id}
-                onClick={() => navigate('/vehicles/' + vehicle.id)}
-                className="group cursor-pointer overflow-hidden rounded-[28px] border border-slate-200 bg-[#fcfbf8] shadow-sm hover:shadow-xl transition-all"
-              >
-                <div className="relative aspect-[16/10] overflow-hidden bg-slate-100">
-                  <img src={vehicle.images[0]?.url} alt={vehicle.title} className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-700" loading="lazy" />
-                  <div className="absolute inset-0 bg-gradient-to-t from-black/35 via-transparent to-transparent" />
-                  <div className="absolute left-4 top-4 flex flex-wrap gap-2">
-                    <span className="rounded-full bg-white/95 px-3 py-1 text-[11px] font-bold text-slate-900">Modele garanti</span>
-                    <span className="rounded-full bg-amber-400 px-3 py-1 text-[11px] font-bold text-slate-950">Premium</span>
-                  </div>
+          <div className="grid gap-5 lg:grid-cols-3">
+            {premiumPromises.map(({ title, description, icon: Icon, metric, image, accent }) => (
+              <article key={title} className="overflow-hidden border border-slate-200 bg-white shadow-sm">
+                <div className="relative aspect-[16/10] overflow-hidden bg-slate-200">
+                  {image ? <img src={image} alt={title} className="h-full w-full object-cover" loading="lazy" /> : null}
+                  <HeroBlock variant="light" overlayClassName="bg-[linear-gradient(180deg,rgba(0,0,0,0.08)_0%,rgba(0,0,0,0.18)_44%,rgba(0,0,0,0.58)_100%)]">
+                    <div className="absolute inset-x-5 bottom-5 flex items-end justify-between gap-4">
+                      <div>
+                        <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/65">{metric}</p>
+                        <p className="mt-2 text-lg font-extrabold text-white">{accent}</p>
+                      </div>
+                      <div className="flex h-11 w-11 items-center justify-center bg-white/10 text-white">
+                        <Icon size={18} />
+                      </div>
+                    </div>
+                  </HeroBlock>
                 </div>
-
-                <div className="p-5">
-                  <div className="flex items-start justify-between gap-3 mb-2">
-                    <div>
-                      <h3 className="text-xl font-extrabold text-slate-900">{vehicle.brand} {vehicle.model}</h3>
-                      <p className="text-sm text-slate-500">{vehicle.year} • {vehicle.transmission} • {vehicle.fuelType}</p>
-                    </div>
-                    <StarRow rating={vehicle.rating} count={vehicle.reviewCount} />
-                  </div>
-
-                  <div className="flex flex-wrap gap-2 text-[11px] font-semibold text-slate-500 mb-4">
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1">{vehicle.category}</span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1">{vehicle.seats} places</span>
-                    <span className="rounded-full bg-slate-100 px-2.5 py-1">Couverture incluse</span>
-                  </div>
-
-                  <p className="text-sm text-slate-600 leading-relaxed mb-5 line-clamp-2">{vehicle.description}</p>
-
-                  <div className="flex items-end justify-between pt-4 border-t border-slate-200">
-                    <div>
-                      <p className="text-xs uppercase tracking-[0.18em] text-slate-400 mb-1">A partir de</p>
-                      <p className="text-2xl font-extrabold text-slate-900">{vehicle.pricePerDay.toLocaleString()} FCFA</p>
-                      <p className="text-xs text-slate-500">/ jour • TVA incluse</p>
-                    </div>
-                    <div className="text-right">
-                      <p className="text-xs text-slate-500 mb-1">{vehicle.city}</p>
-                      <p className="text-xs font-semibold text-indigo-600">Voir les details</p>
-                    </div>
+                <div className="p-6">
+                  <h3 className="text-xl font-extrabold text-slate-900 mb-3">{title}</h3>
+                  <p className="text-sm text-slate-600 leading-relaxed mb-6">{description}</p>
+                  <div className="flex items-center justify-between border-t border-slate-100 pt-4">
+                    <span className="text-xs uppercase tracking-[0.18em] text-slate-400">Djambo standard</span>
+                    <ArrowRight size={16} className="text-slate-400" />
                   </div>
                 </div>
               </article>
@@ -430,59 +383,191 @@ export const LandingPage: React.FC = () => {
         </div>
       </section>
 
-      <section id="destinations" className="py-20 bg-slate-950 text-white">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-5 mb-8">
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-300 mb-3">Destinations</p>
-              <h2 className="text-3xl md:text-4xl font-extrabold">Ou profiter de FleetCommand Plus ?</h2>
-              <p className="text-slate-400 mt-3 max-w-xl">Votre prochaine destination est a portee de clic, avec un langage de service plus exclusif et des points de remise plus soignes.</p>
-            </div>
-            <div className="text-sm text-slate-500">01 / 06 destinations</div>
+      <section className="border-y border-slate-200 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          <div className="flex flex-col gap-3 mb-6">
+            <span className="text-xs uppercase tracking-[0.22em] text-slate-400">5 infos utiles</span>
+            <h2 className="text-2xl font-extrabold text-slate-950 sm:text-3xl">Ce qu’il faut comprendre immédiatement.</h2>
           </div>
-
-          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
-            {destinationCards.map((destination, index) => (
-              <div key={destination} className="rounded-[28px] border border-white/10 bg-white/5 p-6 backdrop-blur-sm hover:bg-white/10 transition-colors">
-                <p className="text-xs uppercase tracking-[0.18em] text-slate-500 mb-8">Destination {String(index + 1).padStart(2, '0')}</p>
-                <h3 className="text-xl font-bold text-white mb-3">{destination}</h3>
-                <p className="text-sm text-slate-400 mb-5">Point de location premium, accueil simplifie et restitution plus flexible selon disponibilite.</p>
-                <button type="button" className="inline-flex items-center gap-2 text-sm font-semibold text-indigo-300 hover:text-white transition-colors">
-                  Explorer
-                  <ArrowRight size={15} />
-                </button>
-              </div>
-            ))}
+          <div className="flex gap-4 overflow-x-auto pb-2 [scrollbar-width:none] [-ms-overflow-style:none] snap-x snap-mandatory [&::-webkit-scrollbar]:hidden">
+            {keyFacts.map((fact, index) => {
+              const Icon = fact.icon;
+              return (
+                <article key={fact.title} className="group w-[248px] shrink-0 snap-start border border-slate-200 bg-[#fcfbf8] p-5 transition-all duration-200 hover:-translate-y-1 hover:border-slate-300 hover:bg-white hover:shadow-[0_18px_40px_rgba(15,23,42,0.08)] sm:w-[272px]">
+                  <div className="flex items-start justify-between gap-3">
+                    <div className="flex h-11 w-11 items-center justify-center bg-slate-950 text-white">
+                      <Icon size={18} />
+                    </div>
+                    <div className="inline-flex items-center gap-1.5 rounded-full bg-amber-100 px-3 py-1 text-[10px] font-bold uppercase tracking-[0.16em] text-amber-800">
+                      <span className="text-sm leading-none">!</span>
+                      {fact.label}
+                    </div>
+                  </div>
+                  <h3 className="mt-2 text-base font-extrabold text-slate-950">{fact.title}</h3>
+                  <p className="mt-2 text-sm leading-relaxed text-slate-600">{fact.description}</p>
+                </article>
+              );
+            })}
           </div>
         </div>
       </section>
 
-      <section className="py-20 bg-[#f7f5f0]">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 grid lg:grid-cols-[0.95fr_1.05fr] gap-12 items-center">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-3">FleetCommand Plus</p>
-            <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900 leading-tight mb-4">Redefinissez votre facon de voyager.</h2>
-            <p className="text-slate-600 leading-relaxed mb-5">
-              Vivez une experience plus exclusive avec une flotte premium, des informations plus completes et une sensation de fluidite de la recherche jusqu'a la remise des cles.
-            </p>
-            <p className="text-slate-600 leading-relaxed mb-8">
-              Prenez le volant de votre agenda, fixez vos standards, laissez la plateforme travailler votre presentation pour donner envie avant meme le premier contact.
-            </p>
-            <Link to="/vehicles" className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white hover:bg-indigo-700 transition-colors">
-              Decouvrir la flotte
-              <ArrowRight size={16} />
-            </Link>
+      <section id="fleet" className="py-20 bg-white">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col lg:flex-row lg:items-end lg:justify-between gap-5 mb-10">
+            <div className="max-w-3xl">
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-3">Presentation de la flotte</p>
+              <h2 className="text-3xl md:text-4xl font-extrabold text-slate-900">Une vitrine plus propre pour choisir sans effort.</h2>
+              <p className="text-slate-600 mt-3 max-w-2xl leading-relaxed">
+                On passe d'une simple grille a une lecture en deux temps: un modele phare pour l'envie, puis une selection courte pour comparer le bon niveau de service, de style et de tarif.
+              </p>
+            </div>
+            <div className="flex flex-col items-start gap-3 sm:items-end">
+              <div className="flex flex-wrap gap-2.5">
+                {CATEGORIES.slice(0, 5).map((category) => (
+                  <span key={category.value} className="border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-600">
+                    {category.label}
+                  </span>
+                ))}
+              </div>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => shiftFleet('previous')}
+                  className="inline-flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
+                >
+                  <ChevronLeft size={14} />
+                  Precedent
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setSelectedFleetVehicleId((current) => current ? null : 'manual-pause')}
+                  className={'inline-flex items-center gap-2 px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] transition-colors ' + (isFleetPaused ? 'bg-slate-950 text-white' : 'border border-slate-200 bg-white text-slate-700 hover:border-slate-300 hover:text-slate-950')}
+                >
+                  {isFleetPaused ? <Play size={14} /> : <Pause size={14} />}
+                  {isFleetPaused ? 'Relancer' : 'Pause'}
+                </button>
+                <button
+                  type="button"
+                  onClick={() => shiftFleet('next')}
+                  className="inline-flex items-center gap-2 border border-slate-200 bg-white px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-slate-700 transition-colors hover:border-slate-300 hover:text-slate-950"
+                >
+                  Suivant
+                  <ChevronRight size={14} />
+                </button>
+              </div>
+            </div>
           </div>
 
-          <div className="grid grid-cols-2 gap-4">
-            {featuredVehicles.slice(0, 4).map((vehicle, index) => (
-              <div key={vehicle.id} className={(index === 0 || index === 3 ? 'translate-y-6 ' : '') + 'overflow-hidden rounded-[28px] border border-slate-200 bg-white shadow-sm'}>
-                <img src={vehicle.images[1]?.url || vehicle.images[0]?.url} alt={vehicle.title} className="aspect-[4/5] w-full object-cover" loading="lazy" />
-                <div className="p-4">
-                  <p className="text-sm font-bold text-slate-900 line-clamp-1">{vehicle.title}</p>
-                  <p className="text-xs text-slate-500 mt-1">{vehicle.city} • {vehicle.color}</p>
+          {featuredVehicles.length > 0 && (
+            <div className="space-y-5">
+              <div className="border border-slate-200 bg-[#f8f5ef] py-4">
+                <div
+                  ref={fleetScrollRef}
+                  className="flex gap-4 overflow-x-auto px-4 pb-2 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden"
+                >
+                  {rollingFleet.map((vehicle, index) => (
+                    <article
+                      key={`${vehicle.id}-${index}`}
+                      onClick={() => setSelectedFleetVehicleId((current) => current === `${vehicle.id}-${index}` ? null : `${vehicle.id}-${index}`)}
+                      className={'group w-[300px] shrink-0 cursor-pointer overflow-hidden bg-white shadow-sm transition-transform hover:-translate-y-1 ' + (selectedFleetVehicleId === `${vehicle.id}-${index}` ? 'ring-2 ring-slate-950' : '')}
+                    >
+                      <div className="relative aspect-[16/8.6] overflow-hidden bg-slate-100 sm:aspect-[16/10]">
+                        <img
+                          src={vehicle.images[0]?.url}
+                          alt={vehicle.title}
+                          className="h-full w-full object-cover transition-transform duration-700 group-hover:scale-105"
+                          loading={index >= fleetCenterStartIndex - 1 && index <= fleetCenterStartIndex + 2 ? 'eager' : 'lazy'}
+                          fetchPriority={index >= fleetCenterStartIndex - 1 && index <= fleetCenterStartIndex + 2 ? 'high' : 'low'}
+                          decoding="async"
+                        />
+                        <HeroBlock variant="light" overlayClassName="bg-[linear-gradient(180deg,rgba(0,0,0,0.12)_0%,rgba(0,0,0,0.22)_44%,rgba(0,0,0,0.7)_100%)]">
+                          <div className="absolute left-4 top-4 flex gap-2">
+                            <span className="bg-white/95 px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.14em] text-slate-900">{vehicle.category}</span>
+                          </div>
+                          <div className="absolute inset-x-4 bottom-4">
+                            <h3 className="text-xl font-extrabold text-white">{vehicle.brand} {vehicle.model}</h3>
+                            <p className="mt-1 text-xs uppercase tracking-[0.14em] text-white/75">{vehicle.city} • {vehicle.year} • {vehicle.transmission}</p>
+                          </div>
+                        </HeroBlock>
+                      </div>
+
+                      <div className="p-3 sm:p-4">
+                        <div className="flex items-center justify-between gap-3">
+                          <p className="text-sm font-bold text-slate-900">{vehicle.pricePerDay.toLocaleString()} FCFA / jour</p>
+                          <span className="text-[11px] font-semibold uppercase tracking-[0.14em] text-slate-400">{vehicle.seats} places</span>
+                        </div>
+                        <p className="mt-2 text-sm text-slate-500 line-clamp-2">{vehicle.description}</p>
+                        {selectedFleetVehicleId === `${vehicle.id}-${index}` && (
+                          <div className="mt-4 flex items-center justify-between gap-3 border-t border-slate-100 pt-4">
+                            <span className="text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">Defilement en pause</span>
+                            <button
+                              type="button"
+                              onClick={(event) => {
+                                event.stopPropagation();
+                                navigate('/vehicles/' + vehicle.id);
+                              }}
+                              className="inline-flex items-center gap-2 bg-slate-950 px-3 py-2 text-xs font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-slate-800"
+                            >
+                              Voir le detail
+                              <ArrowRight size={14} />
+                            </button>
+                          </div>
+                        )}
+                      </div>
+                    </article>
+                  ))}
                 </div>
               </div>
+
+              <div className="flex justify-start">
+                <Link to="/vehicles" className="inline-flex items-center gap-2 bg-slate-950 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-800">
+                  Voir toute la flotte
+                  <ArrowRight size={16} />
+                </Link>
+              </div>
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section id="destinations" className="py-20 bg-[#fbfaf7] text-slate-900">
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="flex flex-col md:flex-row md:items-end md:justify-between gap-5 mb-8">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-indigo-600 mb-3">Destinations</p>
+              <h2 className="text-3xl md:text-4xl font-extrabold">Ou profiter de Djambo ?</h2>
+              <p className="text-slate-600 mt-3 max-w-2xl">Chaque destination doit deja faire sentir le niveau de service: point de remise, ambiance, flexibilite et type d accompagnement disponible.</p>
+            </div>
+            <div className="text-sm text-slate-400">01 / 06 destinations</div>
+          </div>
+
+          <div className="grid sm:grid-cols-2 lg:grid-cols-3 gap-5">
+            {destinationCards.map((destination, index) => (
+              <article key={destination.title} className="overflow-hidden border border-slate-200 bg-white shadow-sm transition-colors hover:bg-slate-50">
+                <div className="relative aspect-[16/10] overflow-hidden bg-slate-100">
+                  {destination.image ? <img src={destination.image} alt={destination.title} className="h-full w-full object-cover" loading="lazy" /> : null}
+                  <HeroBlock variant="light" overlayClassName="bg-[linear-gradient(180deg,rgba(0,0,0,0.12)_0%,rgba(0,0,0,0.24)_46%,rgba(0,0,0,0.66)_100%)]">
+                    <div className="absolute left-5 top-5 border border-white/25 bg-white/78 px-3 py-1 text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-900">
+                      Destination {String(index + 1).padStart(2, '0')}
+                    </div>
+                    <div className="absolute inset-x-5 bottom-5">
+                      <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-white/72">{destination.subtitle}</p>
+                      <h3 className="mt-2 text-xl font-extrabold text-white">{destination.title}</h3>
+                    </div>
+                  </HeroBlock>
+                </div>
+                <div className="p-6">
+                  <p className="text-sm text-slate-600 leading-relaxed">{destination.detail}</p>
+                  <div className="mt-5 flex flex-wrap gap-2">
+                    {destination.points.map((point) => (
+                      <span key={point} className="border border-slate-200 bg-[#fbfaf7] px-3 py-1.5 text-[11px] font-semibold text-slate-600">
+                        {point}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              </article>
             ))}
           </div>
         </div>
@@ -500,8 +585,8 @@ export const LandingPage: React.FC = () => {
 
           <div className="grid md:grid-cols-3 gap-5">
             {editorialCards.map((card) => (
-              <div key={card.title} className="rounded-[28px] border border-slate-200 bg-[#fcfbf8] p-6">
-                <div className="w-11 h-11 rounded-2xl bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
+              <div key={card.title} className="border border-slate-200 bg-[#fcfbf8] p-6">
+                <div className="w-11 h-11 bg-indigo-50 text-indigo-600 flex items-center justify-center mb-4">
                   <CheckCircle2 size={18} />
                 </div>
                 <h3 className="text-lg font-extrabold text-slate-900 mb-2">{card.title}</h3>
@@ -512,66 +597,99 @@ export const LandingPage: React.FC = () => {
         </div>
       </section>
 
-      <footer className="bg-slate-950 text-white pt-16 pb-10 border-t border-white/10">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
-          <div className="grid lg:grid-cols-[1.2fr_0.8fr_0.8fr_0.8fr] gap-10 pb-10 border-b border-white/10">
+      <footer className="relative overflow-hidden border-t border-slate-200 bg-[#f1ece4] pt-16 pb-10 text-slate-900">
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_top_left,rgba(201,171,114,0.12),transparent_28%),radial-gradient(circle_at_bottom_right,rgba(99,102,241,0.06),transparent_26%)]" />
+        <div className="relative max-w-7xl mx-auto px-4 sm:px-6 lg:px-8">
+          <div className="grid gap-12 border-b border-slate-200 pb-12 lg:grid-cols-[1.05fr_0.95fr] lg:gap-16">
             <div>
-              <div className="flex items-center gap-3 mb-5">
-                <div className="w-11 h-11 rounded-2xl bg-white text-slate-950 flex items-center justify-center">
-                  <Car size={20} />
-                </div>
-                <div>
-                  <p className="text-[11px] uppercase tracking-[0.22em] text-slate-500">Le titre</p>
-                  <p className="text-xl font-extrabold">FleetCommand Plus</p>
-                </div>
+              <div className="flex flex-wrap items-center gap-4">
+                <BrandLogo size="md" />
+                <span className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-500">Mobilité premium</span>
               </div>
-              <p className="text-sm text-slate-400 max-w-md leading-relaxed mb-5">
-                Une marketplace premium pour louer, vendre et presenter une flotte automobile avec plus d'elegance, plus de clarte et une meilleure profondeur de service.
+
+              <h2 className="mt-8 max-w-2xl text-3xl font-extrabold tracking-tight text-slate-950 sm:text-4xl">
+                Louer une belle voiture doit être simple, net et rassurant.
+              </h2>
+
+              <p className="mt-5 max-w-xl text-base leading-relaxed text-slate-600">
+                Djambo présente une flotte premium avec une lecture plus propre, un parcours plus fluide et un niveau de service plus visible dès la première visite.
               </p>
-              <div className="flex flex-wrap gap-2 text-xs text-slate-400">
-                <span className="rounded-full border border-white/10 px-3 py-1.5">Visa</span>
-                <span className="rounded-full border border-white/10 px-3 py-1.5">Mastercard</span>
-                <span className="rounded-full border border-white/10 px-3 py-1.5">American Express</span>
-                <span className="rounded-full border border-white/10 px-3 py-1.5">Bizum</span>
+
+              <div className="mt-8 grid gap-6 sm:grid-cols-3">
+                {[
+                  { label: 'Flotte', value: 'Premium et bien présentée' },
+                  { label: 'Service', value: 'Direct et humain' },
+                  { label: 'Parcours', value: 'Rapide et lisible' },
+                ].map((item) => (
+                  <div key={item.label}>
+                    <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-slate-400">{item.label}</p>
+                    <p className="mt-2 text-sm font-bold leading-relaxed text-slate-900">{item.value}</p>
+                  </div>
+                ))}
               </div>
             </div>
 
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 mb-4">Contact</p>
-              <div className="space-y-3 text-sm text-slate-300">
-                <a href="#" className="block hover:text-white transition-colors">Ventes telephoniques</a>
-                <a href="#" className="block hover:text-white transition-colors">Service client</a>
-                <a href="#" className="block hover:text-white transition-colors">Assistance routiere</a>
+            <div className="grid gap-6 sm:grid-cols-2">
+              <div>
+                <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Explorer</p>
+                <div className="space-y-3 text-sm text-slate-600">
+                  <Link to="/vehicles" className="block transition-colors hover:text-slate-900">Toute la flotte</Link>
+                  <Link to="/pricing" className="block transition-colors hover:text-slate-900">Tarifs</Link>
+                  <a href="#benefices" className="block transition-colors hover:text-slate-900">Pourquoi Djambo</a>
+                  <a href="#fleet" className="block transition-colors hover:text-slate-900">Sélection du moment</a>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 mb-4">Reseaux</p>
-              <div className="space-y-3 text-sm text-slate-300">
-                <a href="#" className="block hover:text-white transition-colors">Instagram</a>
-                <a href="#" className="block hover:text-white transition-colors">YouTube</a>
-                <a href="#" className="block hover:text-white transition-colors">OK Help</a>
+              <div>
+                <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Services</p>
+                <div className="space-y-3 text-sm text-slate-600">
+                  <a href="#" className="block transition-colors hover:text-slate-900">Conciergerie premium</a>
+                  <a href="#" className="block transition-colors hover:text-slate-900">Assistance client</a>
+                  <a href="#" className="block transition-colors hover:text-slate-900">Remise soignée</a>
+                  <a href="#" className="block transition-colors hover:text-slate-900">Support réservation</a>
+                </div>
               </div>
-            </div>
 
-            <div>
-              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-500 mb-4">Information</p>
-              <div className="space-y-3 text-sm text-slate-300">
-                <a href="#" className="block hover:text-white transition-colors">Conditions generales</a>
-                <a href="#" className="block hover:text-white transition-colors">Politique de confidentialite</a>
-                <a href="#" className="block hover:text-white transition-colors">Informations legales</a>
-                <a href="#" className="block hover:text-white transition-colors">Cookies</a>
+              <div>
+                <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Contact</p>
+                <div className="space-y-3 text-sm text-slate-600">
+                  <a href="#" className="block transition-colors hover:text-slate-900">Service commercial</a>
+                  <a href="#" className="block transition-colors hover:text-slate-900">Support réservation</a>
+                  <a href="#" className="block transition-colors hover:text-slate-900">Demandes entreprises</a>
+                  <a href="#" className="block transition-colors hover:text-slate-900">Assistance routière</a>
+                </div>
+              </div>
+
+              <div>
+                <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Informations</p>
+                <div className="space-y-3 text-sm text-slate-600">
+                  <Link to="/terms" className="block transition-colors hover:text-slate-900">Conditions générales</Link>
+                  <Link to="/privacy" className="block transition-colors hover:text-slate-900">Politique de confidentialité</Link>
+                  <Link to="/privacy" className="block transition-colors hover:text-slate-900">Informations légales</Link>
+                  <Link to="/cookies" className="block transition-colors hover:text-slate-900">Cookies et préférences</Link>
+                </div>
               </div>
             </div>
           </div>
 
-          <div className="pt-6 flex flex-col md:flex-row md:items-center md:justify-between gap-4 text-xs text-slate-500">
-            <p>2026 - FleetCommand Plus. Tous droits reserves.</p>
-            <div className="flex items-center gap-4 flex-wrap">
+          <div className="grid gap-8 py-8 lg:grid-cols-[1.1fr_0.9fr] lg:items-end">
+            <div>
+              <p className="text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Engagement</p>
+              <p className="mt-3 max-w-3xl text-sm leading-relaxed text-slate-600">
+                Une expérience claire, un ton sobre et un accès rapide à l’essentiel: la flotte, le service et la réservation.
+              </p>
+            </div>
+
+            <div className="flex flex-col gap-4 text-xs text-slate-500 sm:flex-row sm:flex-wrap sm:items-center sm:justify-start lg:justify-end">
               <span className="inline-flex items-center gap-2"><Globe size={12} /> FR active</span>
               <span className="inline-flex items-center gap-2"><Headphones size={12} /> Conciergerie premium</span>
-              <span className="inline-flex items-center gap-2"><Users size={12} /> Profils verifies</span>
+              <span className="inline-flex items-center gap-2"><Users size={12} /> Profils vérifiés</span>
             </div>
+          </div>
+
+          <div className="flex flex-col gap-3 border-t border-slate-200 pt-6 text-xs text-slate-500 sm:flex-row sm:items-center sm:justify-between">
+            <p>2026 Djambo. Tous droits réservés.</p>
+            <p>Mobilité premium, réservation simple, service soigné.</p>
           </div>
         </div>
       </footer>
