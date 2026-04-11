@@ -103,7 +103,7 @@ export const ContractManager: React.FC = () => {
         }
 
         setCustomers(customerResponse);
-  setRegisteredCandidates(registeredResponse);
+          setRegisteredCandidates(registeredResponse);
         setVehicles(vehicleResponse);
         setContractList(contractResponse);
         setSettings(settingsResponse);
@@ -434,72 +434,66 @@ export const ContractManager: React.FC = () => {
           <div className="space-y-5">
             <label className="space-y-2">
               <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700"><User size={14} /> Client</span>
-              <div className="rounded-[24px] border border-slate-200 bg-slate-50/70 p-4">
-                <div className="relative">
-                  <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
-                  <input
-                    type="text"
-                    value={customerSearchTerm}
-                    onChange={(event) => setCustomerSearchTerm(event.target.value)}
-                    placeholder="Rechercher un client ajoute par nom, email ou telephone"
-                    className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm outline-none focus:border-slate-950"
-                  />
-                </div>
-
-                <div className="mt-4 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
-                  <span className="inline-flex items-center gap-2"><Users size={13} /> {filteredCustomers.length} client{filteredCustomers.length > 1 ? 's' : ''} visible{filteredCustomers.length > 1 ? 's' : ''}</span>
-                    {selectedPickerCustomer ? <span className="text-emerald-600">Client selectionne</span> : <span>Aucune selection</span>}
-                </div>
-
-                <div className="mt-4 max-h-[260px] space-y-3 overflow-y-auto pr-1">
-                  {filteredCustomers.length > 0 ? filteredCustomers.map((customer) => {
-                    const isSelected = customer.id === selectedCustomer;
-
-                    return (
-                      <button
-                        key={customer.id}
-                        type="button"
-                        onClick={() => setSelectedCustomer(customer.id)}
-                        className={`w-full rounded-[22px] border px-4 py-3 text-left transition-colors ${isSelected ? 'border-slate-950 bg-slate-950 text-white' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'}`}
-                      >
-                        <div className="flex items-start justify-between gap-3">
-                          <div>
-                            <p className={`text-sm font-extrabold ${isSelected ? 'text-white' : 'text-slate-950'}`}>{customer.fullName}</p>
-                            <p className={`mt-1 text-sm ${isSelected ? 'text-white/75' : 'text-slate-500'}`}>{customer.email}</p>
-                            <p className={`mt-1 text-xs ${isSelected ? 'text-white/70' : 'text-slate-400'}`}>{customer.phone || 'Telephone non renseigne'}</p>
-                          </div>
-                          <span className={`rounded-full px-3 py-1 text-[11px] font-bold ${isSelected ? 'bg-white/10 text-white' : customer.status === 'Actif' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                            {customer.status}
-                          </span>
-                        </div>
-
-                        <div className={`mt-3 flex flex-wrap gap-2 text-[11px] font-semibold ${isSelected ? 'text-white/80' : 'text-slate-600'}`}>
-                          {customer.interestType && (
-                            <span className={`rounded-full px-3 py-1 ${isSelected ? 'bg-white/10 text-white' : customer.interestType === 'RENT' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}>
-                              {customer.interestType === 'RENT' ? 'Location' : 'Achat'}
-                            </span>
-                          )}
-                          {!customers.some((entry) => entry.id === customer.id) && (
-                            <span className={`rounded-full px-3 py-1 ${isSelected ? 'bg-white/10 text-white' : 'bg-emerald-50 text-emerald-700'}`}>
-                              Compte inscrit du parc
-                            </span>
-                          )}
-                          <span className={`rounded-full px-3 py-1 ${isSelected ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                            {customer.totalBookings} reservation(s)
-                          </span>
-                          <span className={`rounded-full px-3 py-1 ${isSelected ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>
-                            {customer.totalRequests} demande(s)
-                          </span>
-                        </div>
-                      </button>
-                    );
-                  }) : (
-                    <div className="rounded-[22px] border border-dashed border-slate-200 bg-white px-4 py-8 text-center text-sm text-slate-500">
-                      Aucun client ajoute ne correspond a cette recherche.
+              <details className="rounded-[24px] border border-slate-200 bg-slate-50/70 open:bg-white">
+                <summary className="cursor-pointer list-none px-4 py-4">
+                  <div className="flex items-center justify-between gap-4">
+                    <div>
+                      <p className="text-sm font-bold text-slate-950">{selectedPickerCustomer ? selectedPickerCustomer.fullName : 'Choisir un client enregistre'}</p>
+                      <p className="mt-1 text-xs text-slate-500">{selectedPickerCustomer ? selectedPickerCustomer.email : `${pickerCustomers.length} client(s) disponible(s) dans la liste`}</p>
                     </div>
-                  )}
+                    <span className="rounded-full bg-white px-3 py-1 text-[11px] font-bold uppercase tracking-[0.14em] text-slate-600 ring-1 ring-slate-200">
+                      Liste depliante
+                    </span>
+                  </div>
+                </summary>
+
+                <div className="border-t border-slate-200 px-4 pb-4 pt-4">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400" size={16} />
+                    <input
+                      type="text"
+                      value={customerSearchTerm}
+                      onChange={(event) => setCustomerSearchTerm(event.target.value)}
+                      placeholder="Filtrer la liste des clients enregistres"
+                      className="w-full rounded-2xl border border-slate-200 bg-white py-3 pl-10 pr-4 text-sm outline-none focus:border-slate-950"
+                    />
+                  </div>
+
+                  <div className="mt-4 max-h-[240px] overflow-y-auto rounded-2xl border border-slate-200 bg-white">
+                    {filteredCustomers.length > 0 ? filteredCustomers.map((customer, index) => {
+                      const isSelected = customer.id === selectedCustomer;
+
+                      return (
+                        <button
+                          key={customer.id}
+                          type="button"
+                          onClick={() => setSelectedCustomer(customer.id)}
+                          className={`flex w-full items-center justify-between gap-3 px-4 py-3 text-left transition-colors ${index !== filteredCustomers.length - 1 ? 'border-b border-slate-100' : ''} ${isSelected ? 'bg-slate-950 text-white' : 'hover:bg-slate-50'}`}
+                        >
+                          <div className="min-w-0">
+                            <p className={`truncate text-sm font-bold ${isSelected ? 'text-white' : 'text-slate-950'}`}>{customer.fullName}</p>
+                            <p className={`truncate text-xs ${isSelected ? 'text-white/70' : 'text-slate-500'}`}>{customer.email}</p>
+                          </div>
+                          <div className="flex shrink-0 items-center gap-2">
+                            {!customers.some((entry) => entry.id === customer.id) && (
+                              <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${isSelected ? 'bg-white/10 text-white' : 'bg-emerald-50 text-emerald-700'}`}>
+                                Compte parc
+                              </span>
+                            )}
+                            <span className={`rounded-full px-2.5 py-1 text-[10px] font-bold uppercase tracking-[0.12em] ${isSelected ? 'bg-white/10 text-white' : customer.status === 'Actif' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+                              {customer.status}
+                            </span>
+                          </div>
+                        </button>
+                      );
+                    }) : (
+                      <div className="px-4 py-8 text-center text-sm text-slate-500">
+                        Aucun client enregistre ne correspond a cette recherche.
+                      </div>
+                    )}
+                  </div>
                 </div>
-              </div>
+              </details>
             </label>
 
             <label className="space-y-2">

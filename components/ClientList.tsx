@@ -93,9 +93,85 @@ export const ClientList: React.FC = () => {
         .some((value) => value.toLowerCase().includes(term))
     );
   }, [customers, searchTerm]);
+  const activeCustomerList = useMemo(
+    () => filteredCustomers.filter((customer) => customer.status === 'Actif'),
+    [filteredCustomers]
+  );
+  const followUpCustomerList = useMemo(
+    () => filteredCustomers.filter((customer) => customer.status !== 'Actif'),
+    [filteredCustomers]
+  );
 
   const totalRevenue = customers.reduce((sum, customer) => sum + customer.totalSpent, 0);
   const activeCustomers = customers.filter((customer) => customer.status === 'Actif').length;
+
+  const renderCustomerCard = (customer: CustomerSummary) => (
+    <article key={customer.id} className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
+      <div className="flex items-start justify-between gap-4">
+        <div className="flex items-center gap-3">
+          <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100 text-sm font-bold text-indigo-700">
+            {customer.firstName[0]}{customer.lastName[0]}
+          </div>
+          <div>
+            <p className="text-lg font-extrabold text-slate-950">{customer.fullName}</p>
+            <p className="mt-1 text-sm text-slate-500">{customer.status === 'Actif' ? 'Client engage récemment' : 'Dernière activité plus ancienne'}</p>
+          </div>
+        </div>
+        <span className={`rounded-full px-3 py-1 text-xs font-bold ${customer.status === 'Actif' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
+          {customer.status}
+        </span>
+      </div>
+
+      <div className="mt-5 grid gap-3 sm:grid-cols-2">
+        <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Contact</p>
+          <p className="mt-2 flex items-center gap-2"><Mail size={14} className="text-slate-400" /> {customer.email}</p>
+          <p className="mt-1 flex items-center gap-2"><Phone size={14} className="text-slate-400" /> {customer.phone || 'Non renseigne'}</p>
+        </div>
+        <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
+          <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Activite</p>
+          <p className="mt-2">{customer.totalBookings} reservation(s) confirmee(s)</p>
+          <p className="mt-1">{customer.totalRequests} demande(s) deposee(s)</p>
+        </div>
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold text-slate-600">
+        <span className="rounded-full bg-slate-100 px-3 py-1">Valeur {customer.totalSpent.toLocaleString()} FCFA</span>
+        {customer.interestType && (
+          <span className={`rounded-full px-3 py-1 ${customer.interestType === 'RENT' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}>
+            {customer.interestType === 'RENT' ? 'Client location' : 'Client achat'}
+          </span>
+        )}
+        {customer.preferredVehicle && (
+          <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">
+            <Car size={12} /> {customer.preferredVehicle}
+          </span>
+        )}
+        {customer.lastActivityAt && (
+          <span className="rounded-full bg-white px-3 py-1 ring-1 ring-slate-200">
+            Derniere activite {new Date(customer.lastActivityAt).toLocaleDateString('fr-FR')}
+          </span>
+        )}
+      </div>
+
+      <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
+        {customer.interestType === 'RENT' && (
+          <button
+            type="button"
+            onClick={() => navigate(`/app/contracts?customerId=${customer.id}&intent=rent`)}
+            className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-xs font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-slate-800"
+          >
+            Creer un contrat
+          </button>
+        )}
+        {customer.interestType === 'BUY' && (
+          <span className="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-bold uppercase tracking-[0.14em] text-amber-700">
+            Suivi achat a traiter
+          </span>
+        )}
+      </div>
+    </article>
+  );
 
   useEffect(() => {
     if (!showCreateModal || modalTab !== 'registered') {
@@ -325,74 +401,44 @@ export const ClientList: React.FC = () => {
             Chargement des clients...
           </div>
         ) : filteredCustomers.length > 0 ? (
-          <div className="grid gap-4 p-6 xl:grid-cols-2">
-            {filteredCustomers.map((customer) => (
-              <article key={customer.id} className="rounded-[26px] border border-slate-200 bg-white p-5 shadow-sm transition-shadow hover:shadow-md">
-                <div className="flex items-start justify-between gap-4">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-12 w-12 items-center justify-center rounded-2xl bg-indigo-100 text-sm font-bold text-indigo-700">
-                      {customer.firstName[0]}{customer.lastName[0]}
-                    </div>
-                    <div>
-                      <p className="text-lg font-extrabold text-slate-950">{customer.fullName}</p>
-                      <p className="mt-1 text-sm text-slate-500">{customer.status === 'Actif' ? 'Client engage récemment' : 'Dernière activité plus ancienne'}</p>
-                    </div>
-                  </div>
-                  <span className={`rounded-full px-3 py-1 text-xs font-bold ${customer.status === 'Actif' ? 'bg-emerald-100 text-emerald-700' : 'bg-amber-100 text-amber-700'}`}>
-                    {customer.status}
-                  </span>
+          <div className="space-y-6 p-6">
+            <section className="space-y-4">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-emerald-600">Clients actifs</p>
+                  <h2 className="mt-1 text-lg font-extrabold text-slate-950">Les clients les plus engages en premier.</h2>
                 </div>
+                <span className="rounded-full bg-emerald-50 px-3 py-1 text-xs font-bold text-emerald-700">{activeCustomerList.length}</span>
+              </div>
+              {activeCustomerList.length > 0 ? (
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {activeCustomerList.map(renderCustomerCard)}
+                </div>
+              ) : (
+                <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">
+                  Aucun client actif pour cette recherche.
+                </div>
+              )}
+            </section>
 
-                <div className="mt-5 grid gap-3 sm:grid-cols-2">
-                  <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Contact</p>
-                    <p className="mt-2 flex items-center gap-2"><Mail size={14} className="text-slate-400" /> {customer.email}</p>
-                    <p className="mt-1 flex items-center gap-2"><Phone size={14} className="text-slate-400" /> {customer.phone || 'Non renseigne'}</p>
-                  </div>
-                  <div className="rounded-2xl bg-slate-50 px-4 py-3 text-sm text-slate-600">
-                    <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Activite</p>
-                    <p className="mt-2">{customer.totalBookings} reservation(s) confirmee(s)</p>
-                    <p className="mt-1">{customer.totalRequests} demande(s) deposee(s)</p>
-                  </div>
+            <section className="space-y-4 border-t border-slate-200 pt-6">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-amber-600">A relancer</p>
+                  <h2 className="mt-1 text-lg font-extrabold text-slate-950">Les clients avec une activite plus ancienne.</h2>
                 </div>
-
-                <div className="mt-4 flex flex-wrap gap-2 text-[11px] font-semibold text-slate-600">
-                  <span className="rounded-full bg-slate-100 px-3 py-1">Valeur {customer.totalSpent.toLocaleString()} FCFA</span>
-                  {customer.interestType && (
-                    <span className={`rounded-full px-3 py-1 ${customer.interestType === 'RENT' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}>
-                      {customer.interestType === 'RENT' ? 'Client location' : 'Client achat'}
-                    </span>
-                  )}
-                  {customer.preferredVehicle && (
-                    <span className="inline-flex items-center gap-1 rounded-full bg-indigo-50 px-3 py-1 text-indigo-700">
-                      <Car size={12} /> {customer.preferredVehicle}
-                    </span>
-                  )}
-                  {customer.lastActivityAt && (
-                    <span className="rounded-full bg-white px-3 py-1 ring-1 ring-slate-200">
-                      Derniere activite {new Date(customer.lastActivityAt).toLocaleDateString('fr-FR')}
-                    </span>
-                  )}
+                <span className="rounded-full bg-amber-50 px-3 py-1 text-xs font-bold text-amber-700">{followUpCustomerList.length}</span>
+              </div>
+              {followUpCustomerList.length > 0 ? (
+                <div className="grid gap-4 xl:grid-cols-2">
+                  {followUpCustomerList.map(renderCustomerCard)}
                 </div>
-
-                <div className="mt-4 flex flex-wrap gap-2 border-t border-slate-100 pt-4">
-                  {customer.interestType === 'RENT' && (
-                    <button
-                      type="button"
-                      onClick={() => navigate(`/app/contracts?customerId=${customer.id}&intent=rent`)}
-                      className="inline-flex items-center gap-2 rounded-2xl bg-slate-950 px-4 py-2.5 text-xs font-bold uppercase tracking-[0.14em] text-white transition-colors hover:bg-slate-800"
-                    >
-                      Creer un contrat
-                    </button>
-                  )}
-                  {customer.interestType === 'BUY' && (
-                    <span className="inline-flex items-center gap-2 rounded-2xl border border-amber-200 bg-amber-50 px-4 py-2.5 text-xs font-bold uppercase tracking-[0.14em] text-amber-700">
-                      Suivi achat a traiter
-                    </span>
-                  )}
+              ) : (
+                <div className="rounded-[24px] border border-dashed border-slate-200 bg-slate-50 px-6 py-8 text-center text-sm text-slate-500">
+                  Aucun client a relancer pour cette recherche.
                 </div>
-              </article>
-            ))}
+              )}
+            </section>
           </div>
         ) : (
           <div className="flex min-h-[260px] flex-col items-center justify-center px-6 text-center text-slate-500">
