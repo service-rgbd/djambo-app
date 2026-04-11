@@ -22,6 +22,7 @@ import {
   ManagedContractRecord,
   OwnerInventoryVehicle,
   PrivateAppSettings,
+  RegisteredCustomerCandidate,
 } from '../services/api';
 
 const CONTRACT_ILLUSTRATION_SRC = new URL('../ullustrqtionsectioncontrat.jpg', import.meta.url).href;
@@ -76,6 +77,7 @@ export const ContractManager: React.FC = () => {
   const [contractList, setContractList] = useState<ManagedContractRecord[]>([]);
   const [copiedContractId, setCopiedContractId] = useState('');
   const [customers, setCustomers] = useState<CustomerSummary[]>([]);
+  const [registeredCandidates, setRegisteredCandidates] = useState<RegisteredCustomerCandidate[]>([]);
   const [vehicles, setVehicles] = useState<OwnerInventoryVehicle[]>([]);
   const [settings, setSettings] = useState<PrivateAppSettings>(defaultSettings);
   const [pageLoading, setPageLoading] = useState(true);
@@ -88,8 +90,9 @@ export const ContractManager: React.FC = () => {
     const loadPage = async () => {
       try {
         setPageLoading(true);
-        const [customerResponse, vehicleResponse, contractResponse, settingsResponse] = await Promise.all([
+        const [customerResponse, registeredResponse, vehicleResponse, contractResponse, settingsResponse] = await Promise.all([
           api.getCustomers(),
+          api.searchRegisteredCustomers(''),
           api.getOwnerVehicles(),
           api.getContracts(),
           api.getPrivateSettings(),
@@ -100,6 +103,7 @@ export const ContractManager: React.FC = () => {
         }
 
         setCustomers(customerResponse);
+  setRegisteredCandidates(registeredResponse);
         setVehicles(vehicleResponse);
         setContractList(contractResponse);
         setSettings(settingsResponse);
@@ -152,18 +156,42 @@ export const ContractManager: React.FC = () => {
   }, [customers, location.pathname, location.search, navigate]);
 
   const availableVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.isAvailable), [vehicles]);
+  const pickerCustomers = useMemo(() => {
+    const knownCustomerIds = new Set(customers.map((customer) => customer.id));
+    const knownCustomerEmails = new Set(customers.map((customer) => customer.email.toLowerCase()));
+    const syntheticCandidates = registeredCandidates
+      .filter((candidate) => !knownCustomerIds.has(candidate.id) && !knownCustomerEmails.has(candidate.email.toLowerCase()))
+      .map((candidate) => ({
+        id: candidate.id,
+        firstName: candidate.fullName.split(/\s+/)[0] || 'Client',
+        lastName: candidate.fullName.split(/\s+/).slice(1).join(' ') || 'Djambo',
+        fullName: candidate.fullName,
+        email: candidate.email,
+        phone: candidate.phone,
+        status: 'Actif' as const,
+        totalBookings: 0,
+        totalRequests: 0,
+        totalSpent: 0,
+        lastActivityAt: null,
+        preferredVehicle: null,
+        interestType: 'RENT' as const,
+      }));
+
+    return [...customers, ...syntheticCandidates];
+  }, [customers, registeredCandidates]);
   const filteredCustomers = useMemo(() => {
     const term = customerSearchTerm.trim().toLowerCase();
     if (!term) {
-      return customers;
+      return pickerCustomers;
     }
 
-    return customers.filter((customer) =>
+    return pickerCustomers.filter((customer) =>
       [customer.fullName, customer.email, customer.phone, customer.preferredVehicle || '']
         .some((value) => value.toLowerCase().includes(term))
     );
-  }, [customerSearchTerm, customers]);
+  }, [customerSearchTerm, pickerCustomers]);
   const selectedCustomerObject = customers.find((customer) => customer.id === selectedCustomer);
+  const selectedPickerCustomer = pickerCustomers.find((customer) => customer.id === selectedCustomer) || selectedCustomerObject;
   const selectedVehicleObject = vehicles.find((vehicle) => vehicle.id === selectedVehicle);
 
   const days = useMemo(() => {
@@ -312,8 +340,32 @@ export const ContractManager: React.FC = () => {
 
     try {
       setProcessing(true);
+      let resolvedCustomerId = selectedCustomer;
+      let resolvedCustomer = customers.find((customer) => customer.id === selectedCustomer) || null;
+
+      if (!resolvedCustomer) {
+        const candidate = registeredCandidates.find((entry) => entry.id === selectedCustomer);
+        if (!candidate) {
+          setError('Le client choisi n est pas disponible pour le contrat.');
+          return;
+        }
+
+        const attachedCustomer = await api.createCustomer({
+          fullName: candidate.fullName,
+          email: candidate.email,
+          phone: candidate.phone,
+          interestType: 'RENT',
+        });
+
+        resolvedCustomerId = attachedCustomer.id;
+        resolvedCustomer = attachedCustomer;
+        setSelectedCustomer(attachedCustomer.id);
+        setCustomers((current) => [attachedCustomer, ...current.filter((customer) => customer.id !== attachedCustomer.id)]);
+        setRegisteredCandidates((current) => current.filter((entry) => entry.id !== candidate.id));
+      }
+
       const newContract = await api.createContract({
-        customerId: selectedCustomer,
+        customerId: resolvedCustomerId,
         vehicleId: selectedVehicle,
         startDate,
         endDate,
@@ -329,7 +381,7 @@ export const ContractManager: React.FC = () => {
         ...current,
       ]);
       setPaymentSuccess(true);
-      downloadContractPdf(newContract, selectedCustomerObject, selectedVehicleObject);
+      downloadContractPdf(newContract, resolvedCustomer || undefined, selectedVehicleObject);
       resetForm();
       setTimeout(() => setPaymentSuccess(false), 2500);
       setError('');
@@ -396,7 +448,7 @@ export const ContractManager: React.FC = () => {
 
                 <div className="mt-4 flex items-center justify-between gap-3 text-xs font-semibold uppercase tracking-[0.14em] text-slate-400">
                   <span className="inline-flex items-center gap-2"><Users size={13} /> {filteredCustomers.length} client{filteredCustomers.length > 1 ? 's' : ''} visible{filteredCustomers.length > 1 ? 's' : ''}</span>
-                  {selectedCustomerObject ? <span className="text-emerald-600">Client selectionne</span> : <span>Aucune selection</span>}
+                    {selectedPickerCustomer ? <span className="text-emerald-600">Client selectionne</span> : <span>Aucune selection</span>}
                 </div>
 
                 <div className="mt-4 max-h-[260px] space-y-3 overflow-y-auto pr-1">
@@ -425,6 +477,11 @@ export const ContractManager: React.FC = () => {
                           {customer.interestType && (
                             <span className={`rounded-full px-3 py-1 ${isSelected ? 'bg-white/10 text-white' : customer.interestType === 'RENT' ? 'bg-indigo-50 text-indigo-700' : 'bg-amber-50 text-amber-700'}`}>
                               {customer.interestType === 'RENT' ? 'Location' : 'Achat'}
+                            </span>
+                          )}
+                          {!customers.some((entry) => entry.id === customer.id) && (
+                            <span className={`rounded-full px-3 py-1 ${isSelected ? 'bg-white/10 text-white' : 'bg-emerald-50 text-emerald-700'}`}>
+                              Compte inscrit du parc
                             </span>
                           )}
                           <span className={`rounded-full px-3 py-1 ${isSelected ? 'bg-white/10 text-white' : 'bg-slate-100 text-slate-600'}`}>
@@ -509,8 +566,8 @@ export const ContractManager: React.FC = () => {
           <div className="space-y-4">
             <div className="border border-slate-200 bg-slate-50 p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Client</p>
-              <p className="mt-2 text-sm font-bold text-slate-900">{selectedCustomerObject ? selectedCustomerObject.fullName : 'Aucun client selectionne'}</p>
-              <p className="mt-1 text-sm text-slate-500">{selectedCustomerObject?.email || 'Selectionnez un client pour continuer.'}</p>
+              <p className="mt-2 text-sm font-bold text-slate-900">{selectedPickerCustomer ? selectedPickerCustomer.fullName : 'Aucun client selectionne'}</p>
+              <p className="mt-1 text-sm text-slate-500">{selectedPickerCustomer?.email || 'Selectionnez un client pour continuer.'}</p>
             </div>
 
             <div className="border border-slate-200 bg-slate-50 p-4">
