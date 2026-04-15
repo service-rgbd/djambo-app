@@ -131,16 +131,60 @@ const buildStaticAiReply = (message) => {
     return 'Je peux resumer votre activite, expliquer un module, proposer une action concrete sur les clients, les contrats ou la flotte, et signaler les points a surveiller.';
   }
 
+  if (/(que fais tu|a quoi sers tu|comment tu aides)/.test(message)) {
+    return 'Je sers a vous faire gagner du temps dans Djambo: comprendre un module, retrouver le bon flux client, cadrer un contrat et signaler les points qui meritent votre attention.';
+  }
+
   if (/(comment|ou).*(ajouter|creer).*(client)/.test(message)) {
     return 'Depuis Clients, utilisez Ajouter un client puis choisissez soit un compte deja inscrit, soit une creation manuelle. Pour une location, le client peut ensuite etre envoye directement vers le module Contrats.';
+  }
+
+  if (/(rattacher|lier|relier).*(client|compte|utilisateur)/.test(message)) {
+    return 'Dans Clients, ouvrez la zone de rattachement rapide puis cherchez le compte deja inscrit. Une fois rattache, il rejoint votre base client et peut etre reutilise dans les contrats.';
+  }
+
+  if (/(rechercher|retrouver|chercher).*(client)/.test(message)) {
+    return 'Le champ de recherche de la page Clients permet de filtrer par nom, email, telephone ou vehicule prefere. Utilisez-le avant de creer un nouveau client pour eviter les doublons.';
   }
 
   if (/(comment|ou).*(contrat)/.test(message)) {
     return 'Le flux optimal est simple: choisissez le client, selectionnez un vehicule disponible, renseignez la periode, verifiez le total, puis generez le PDF. Chaque dossier emis reste consultable dans la liste des contrats.';
   }
 
+  if (/(pdf|telecharger).*(contrat)|contrat.*(pdf|telecharger)/.test(message)) {
+    return 'Chaque dossier emis dans Contrats peut etre retéléchargé en PDF depuis la liste des contrats. Vous pouvez aussi ouvrir son lien ou copier ce lien pour le partager.';
+  }
+
+  if (/(chauffeur).*(contrat|ajouter|option)|contrat.*chauffeur/.test(message)) {
+    return 'Dans le module Contrats, activez l option chauffeur a la demande. Le tarif journalier chauffeur est alors ajoute au total estime et integre dans le PDF.';
+  }
+
+  if (/(paiement|mode de paiement|virement|carte|especes)/.test(message)) {
+    return 'Le contrat peut etre prepare avec Carte bancaire, Virement ou Especes. Le mode choisi apparait dans le resume, dans la liste des dossiers et dans le PDF genere.';
+  }
+
+  if (/(vehicule|voiture).*(disponible|disponibilite)|disponibilite.*(vehicule|voiture)/.test(message)) {
+    return 'Djamba s appuie sur les vehicules disponibles pour la creation de contrat. Si un vehicule n apparait pas dans le selecteur, verifiez son statut de disponibilite dans votre inventaire.';
+  }
+
+  if (/(tableau de bord|dashboard|vue d ensemble|resume)/.test(message)) {
+    return 'Le dashboard sert a suivre les vehicules listes, les reservations actives, le revenu et les notifications recentes. Utilisez-le pour reperer rapidement les sujets a traiter avant d entrer dans un module detaille.';
+  }
+
+  if (/(notification|alertes?|attention|priorite)/.test(message)) {
+    return 'Les priorites a traiter sont en general les paiements en attente, les demandes clients recentes, les vehicules indisponibles trop longtemps et les dossiers qui doivent etre finalises en contrat.';
+  }
+
+  if (/(prix|tarif|cout).*(vehicule|location|jour)|tarif.*jour/.test(message)) {
+    return 'Le total d un contrat depend de la duree, du tarif journalier du vehicule et des options comme le chauffeur. Le module Contrats recalcule ce montant automatiquement avant generation.';
+  }
+
   if (/(cout|co[uû]t|credits?|tokens?|openrouter).*(ia|chat|assistant)|comment.*(economiser|reduire|limiter).*(credits?|cout|tokens?)/.test(message)) {
     return 'Pour limiter les couts IA, Djambo repond localement aux questions courtes, reutilise un cache sur les demandes repetees et n appelle OpenRouter que pour les cas qui demandent une vraie analyse. Les reponses sont aussi volontairement courtes pour reduire les tokens.';
+  }
+
+  if (/(pourquoi).*(pas de reponse|ne repond pas|indisponible).*(chat|assistant)|chat.*(erreur|indisponible)/.test(message)) {
+    return 'Si le chat ne repond pas, il faut verifier que le backend distant est joignable, que la route /api/ai/chat est bien deployee et que la variable OPEN_AI_CHAT_BOT est presente sur Render.';
   }
 
   return '';
@@ -680,6 +724,25 @@ const toSlug = (value) => String(value || '')
   .toLowerCase()
   .replace(/[^a-z0-9]+/g, '-')
   .replace(/^-+|-+$/g, '') || 'djambo';
+
+const getSlugFromPublicUrl = (value) => {
+  const text = sanitizeText(value);
+  if (!text) {
+    return '';
+  }
+
+  const hashMatch = text.match(/#\/(?:store|profile)\/([^/?#]+)/i);
+  if (hashMatch?.[1]) {
+    return sanitizeText(hashMatch[1]).toLowerCase();
+  }
+
+  const pathMatch = text.match(/\/(?:store|profile)\/([^/?#]+)/i);
+  if (pathMatch?.[1]) {
+    return sanitizeText(pathMatch[1]).toLowerCase();
+  }
+
+  return '';
+};
 
 const buildDefaultSettings = ({ user, ownerProfile, settingsRow }) => {
   const businessName = settingsRow?.business_name || ownerProfile?.display_name || user.full_name || 'Djambo Mobility';
@@ -1350,8 +1413,9 @@ app.get('/api/storefront/:slug', async (req, res) => {
       ownerRows = await sql`
          select op.id, op.user_id, op.type, op.display_name, op.description, op.address, op.city, op.country,
                op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
-               aps.store_slug
+               aps.store_slug, aps.public_store_url, aps.public_profile_url, u.full_name as user_full_name
         from owner_profiles op
+        join app_users u on u.id = op.user_id
         left join app_settings aps on aps.user_id = op.user_id
         order by op.display_name;
       `;
@@ -1363,13 +1427,25 @@ app.get('/api/storefront/:slug', async (req, res) => {
       ownerRows = await sql`
         select op.id, op.user_id, null::text as type, op.display_name, op.description, op.address, op.city, op.country,
                op.rating, op.review_count, op.vehicle_count, op.verified, op.whatsapp, op.response_time, op.member_since,
-               null::text as store_slug
+               null::text as store_slug, null::text as public_store_url, null::text as public_profile_url, u.full_name as user_full_name
         from owner_profiles op
+        join app_users u on u.id = op.user_id
         order by op.display_name;
       `;
     }
 
-    const matchedOwner = ownerRows.find((row) => (row.store_slug || toSlug(row.display_name)) === req.params.slug);
+    const requestedSlug = sanitizeText(req.params.slug).toLowerCase();
+    const matchedOwner = ownerRows.find((row) => {
+      const candidateSlugs = new Set([
+        sanitizeText(row.store_slug).toLowerCase(),
+        toSlug(row.display_name),
+        toSlug(row.user_full_name),
+        getSlugFromPublicUrl(row.public_store_url),
+        getSlugFromPublicUrl(row.public_profile_url),
+      ].filter(Boolean));
+
+      return candidateSlugs.has(requestedSlug);
+    });
     if (!matchedOwner) {
       return res.status(404).json({ message: 'Storefront not found' });
     }
