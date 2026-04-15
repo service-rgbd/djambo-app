@@ -38,6 +38,12 @@ services:
         sync: false
       - key: GOOGLE_CLIENT_SECRET
         sync: false
+      - key: OPEN_AI_CHAT_BOT
+        sync: false
+      - key: OPENROUTER_MODEL
+        value: google/gemini-2.0-flash-001
+      - key: AI_CACHE_TTL_MS
+        value: 21600000
 
   - type: web
     name: fleetcommand-web

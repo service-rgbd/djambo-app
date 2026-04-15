@@ -20,6 +20,10 @@ const hashPassword = (password) => crypto.scryptSync(password, 'fleetcommand-sal
 const hashVerificationToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 const resendApiKey = env.RESEND_API_KEY;
 const resendFromEmail = env.RESEND_FROM_EMAIL || 'Djambo <onboarding@resend.dev>';
+const openRouterApiKey = env.OPEN_AI_CHAT_BOT || env.OPENROUTER_API_KEY || '';
+const openRouterModel = env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001';
+const aiCacheTtlMs = Math.max(60_000, Number(env.AI_CACHE_TTL_MS || 21_600_000) || 21_600_000);
+const aiResponseCache = new Map();
 const isProduction = process.env.NODE_ENV === 'production';
 const normalizedAppUrl = (() => {
   const rawUrl = env.APP_URL || 'http://localhost:3000';
@@ -75,6 +79,155 @@ const normalizeReservationMode = (value) => {
 };
 
 const sanitizeText = (value) => typeof value === 'string' ? value.trim() : '';
+
+const normalizeAiPrompt = (value) => sanitizeText(value)
+  .toLowerCase()
+  .replace(/\s+/g, ' ')
+  .slice(0, 500);
+
+const pruneAiResponseCache = () => {
+  const now = Date.now();
+  for (const [key, entry] of aiResponseCache.entries()) {
+    if (!entry || entry.expiresAt <= now) {
+      aiResponseCache.delete(key);
+    }
+  }
+};
+
+const buildAiCacheKey = (userId, messages) => {
+  const serialized = JSON.stringify(messages.map((message) => [message.role, normalizeAiPrompt(message.text)]));
+  return `${userId}:${crypto.createHash('sha1').update(serialized).digest('hex')}`;
+};
+
+const extractOpenRouterText = (payload) => {
+  const content = payload?.choices?.[0]?.message?.content;
+  if (typeof content === 'string') {
+    return sanitizeText(content);
+  }
+
+  if (Array.isArray(content)) {
+    return sanitizeText(content.map((part) => {
+      if (typeof part === 'string') {
+        return part;
+      }
+
+      if (part && typeof part.text === 'string') {
+        return part.text;
+      }
+
+      return '';
+    }).join('\n'));
+  }
+
+  return '';
+};
+
+const buildStaticAiReply = (message) => {
+  if (/^(bonjour|salut|bonsoir|hello)\b/.test(message)) {
+    return 'Bonjour. Je peux vous aider sur les clients, les contrats, les vehicules et les actions prioritaires de votre espace Djambo.';
+  }
+
+  if (/(qui es tu|que peux tu faire|aide|help)/.test(message)) {
+    return 'Je peux resumer votre activite, expliquer un module, proposer une action concrete sur les clients, les contrats ou la flotte, et signaler les points a surveiller.';
+  }
+
+  if (/(comment|ou).*(ajouter|creer).*(client)/.test(message)) {
+    return 'Depuis Clients, utilisez Ajouter un client puis choisissez soit un compte deja inscrit, soit une creation manuelle. Pour une location, le client peut ensuite etre envoye directement vers le module Contrats.';
+  }
+
+  if (/(comment|ou).*(contrat)/.test(message)) {
+    return 'Le flux optimal est simple: choisissez le client, selectionnez un vehicule disponible, renseignez la periode, verifiez le total, puis generez le PDF. Chaque dossier emis reste consultable dans la liste des contrats.';
+  }
+
+  if (/(cout|co[uû]t|credits?|tokens?|openrouter).*(ia|chat|assistant)|comment.*(economiser|reduire|limiter).*(credits?|cout|tokens?)/.test(message)) {
+    return 'Pour limiter les couts IA, Djambo repond localement aux questions courtes, reutilise un cache sur les demandes repetees et n appelle OpenRouter que pour les cas qui demandent une vraie analyse. Les reponses sont aussi volontairement courtes pour reduire les tokens.';
+  }
+
+  return '';
+};
+
+const buildAiSnapshot = async (userId) => {
+  const ownerProfile = await getOwnerProfileByUserId(userId);
+  if (!ownerProfile) {
+    return {
+      currentDate: new Date().toISOString().slice(0, 10),
+      scope: 'user',
+      note: 'Utilisateur connecte sans profil proprietaire.'
+    };
+  }
+
+  const [vehicleCounts] = await sql`
+    select
+      count(*)::int as total,
+      count(*) filter (where is_available = true)::int as available,
+      coalesce(avg(price_per_day), 0)::int as average_daily_rate
+    from vehicles
+    where owner_id = ${ownerProfile.id};
+  `;
+
+  const [contractCounts] = await sql`
+    select
+      count(*)::int as total,
+      count(*) filter (where status = 'ACTIVE')::int as active,
+      count(*) filter (where status = 'PENDING_PAYMENT')::int as pending_payment,
+      coalesce(sum(total_amount), 0)::int as booked_amount
+    from contracts
+    where owner_id = ${ownerProfile.id};
+  `;
+
+  const customerSummaries = await getCustomerSummariesByUserId(userId);
+  const recentContracts = await sql`
+    select c.contract_number, c.total_amount, c.start_date, c.end_date, u.full_name, concat(v.brand, ' ', v.model) as vehicle_label
+    from contracts c
+    join app_users u on u.id = c.customer_id
+    join vehicles v on v.id = c.vehicle_id
+    where c.owner_id = ${ownerProfile.id}
+    order by c.generated_at desc nulls last, c.created_at desc
+    limit 3;
+  `;
+
+  return {
+    currentDate: new Date().toISOString().slice(0, 10),
+    scope: 'owner',
+    ownerDisplayName: ownerProfile.display_name,
+    city: ownerProfile.city || '',
+    vehicles: {
+      total: vehicleCounts?.total || 0,
+      available: vehicleCounts?.available || 0,
+      averageDailyRate: vehicleCounts?.average_daily_rate || 0,
+    },
+    customers: {
+      total: customerSummaries.length,
+      active: customerSummaries.filter((customer) => customer.status === 'Actif').length,
+    },
+    contracts: {
+      total: contractCounts?.total || 0,
+      active: contractCounts?.active || 0,
+      pendingPayment: contractCounts?.pending_payment || 0,
+      bookedAmount: contractCounts?.booked_amount || 0,
+    },
+    recentContracts: recentContracts.map((contract) => ({
+      contractNumber: contract.contract_number,
+      customerName: contract.full_name,
+      vehicleLabel: contract.vehicle_label,
+      totalAmount: contract.total_amount,
+      startDate: contract.start_date,
+      endDate: contract.end_date,
+    })),
+  };
+};
+
+const buildAiSystemPrompt = (snapshot) => {
+  return [
+    'Tu es FleetMind, assistant operationnel de Djambo pour un gestionnaire de flotte.',
+    'Reponds uniquement en francais, avec un ton direct, utile et concis.',
+    'Si la question est simple, reponds sans utiliser un long developpement: 3 a 6 phrases courtes ou 4 puces maximum.',
+    'Ne donne pas de chiffres inventes: utilise seulement le contexte fourni quand il est pertinent.',
+    'Pour les demandes hors perimetre, recadre poliment vers la gestion clients, contrats, vehicules, revenus ou operations.',
+    'Quand c est utile, termine par une action concrete a faire dans l application.',
+    `Contexte metier compact: ${JSON.stringify(snapshot)}`,
+  ].join(' ');
+};
 
 const slugifyFilePart = (value) => sanitizeText(value)
   .normalize('NFD')
@@ -2229,6 +2382,89 @@ app.put('/api/settings', async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Settings update failed' });
+  }
+});
+
+app.post('/api/ai/chat', async (req, res) => {
+  try {
+    const userId = getRequestUserId(req);
+    if (!userId) {
+      return res.status(401).json({ message: 'Missing user id' });
+    }
+
+    const rawMessages = Array.isArray(req.body?.messages) ? req.body.messages : [];
+    const messages = rawMessages
+      .map((message) => ({
+        role: message?.role === 'assistant' ? 'assistant' : 'user',
+        text: sanitizeText(message?.text).slice(0, 1_500),
+      }))
+      .filter((message) => message.text)
+      .slice(-8);
+
+    const latestUserMessage = [...messages].reverse().find((message) => message.role === 'user');
+    if (!latestUserMessage) {
+      return res.status(400).json({ message: 'Aucun message utilisateur valide.' });
+    }
+
+    const normalizedPrompt = normalizeAiPrompt(latestUserMessage.text);
+    const staticReply = buildStaticAiReply(normalizedPrompt);
+    if (staticReply) {
+      return res.json({ reply: staticReply, source: 'fallback', cached: false, model: 'local-rules' });
+    }
+
+    pruneAiResponseCache();
+    const cacheKey = buildAiCacheKey(userId, messages);
+    const cachedEntry = aiResponseCache.get(cacheKey);
+    if (cachedEntry && cachedEntry.expiresAt > Date.now()) {
+      return res.json({ reply: cachedEntry.reply, source: 'cache', cached: true, model: cachedEntry.model });
+    }
+
+    if (!openRouterApiKey) {
+      return res.status(503).json({ message: 'OPEN_AI_CHAT_BOT ou OPENROUTER_API_KEY manquante sur le backend Render.' });
+    }
+
+    const snapshot = await buildAiSnapshot(userId);
+    const response = await fetch('https://openrouter.ai/api/v1/chat/completions', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${openRouterApiKey}`,
+        'Content-Type': 'application/json',
+        'HTTP-Referer': normalizedAppUrl,
+        'X-Title': 'Djambo FleetMind',
+      },
+      body: JSON.stringify({
+        model: openRouterModel,
+        temperature: 0.2,
+        max_tokens: 260,
+        messages: [
+          { role: 'system', content: buildAiSystemPrompt(snapshot) },
+          ...messages.map((message) => ({ role: message.role, content: message.text })),
+        ],
+      }),
+    });
+
+    if (!response.ok) {
+      const payload = await response.text();
+      console.error('OpenRouter request failed:', payload);
+      return res.status(502).json({ message: 'OpenRouter n a pas pu traiter la demande.' });
+    }
+
+    const payload = await response.json();
+    const reply = extractOpenRouterText(payload);
+    if (!reply) {
+      return res.status(502).json({ message: 'Reponse vide retournee par OpenRouter.' });
+    }
+
+    aiResponseCache.set(cacheKey, {
+      reply,
+      model: openRouterModel,
+      expiresAt: Date.now() + aiCacheTtlMs,
+    });
+
+    return res.json({ reply, source: 'openrouter', cached: false, model: openRouterModel });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'AI chat failed' });
   }
 });
 
