@@ -72,6 +72,8 @@ export const LegalPageShell: React.FC<LegalPageShellProps> = ({ eyebrow, title, 
             <div className="border border-slate-200 bg-slate-950 p-5 text-white shadow-sm">
               <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-white/55">Liens utiles</p>
               <div className="mt-4 space-y-3 text-sm">
+                <Link to="/about" className="block text-white/82 transition-colors hover:text-white">A propos de Djambo</Link>
+                <Link to="/legal" className="block text-white/82 transition-colors hover:text-white">Mentions legales</Link>
                 <Link to="/cookies" className="block text-white/82 transition-colors hover:text-white">Cookies et consentement</Link>
                 <Link to="/privacy" className="block text-white/82 transition-colors hover:text-white">Confidentialite</Link>
                 <Link to="/terms" className="block text-white/82 transition-colors hover:text-white">Conditions d utilisation</Link>

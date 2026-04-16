@@ -1,5 +1,5 @@
 import React, { useEffect, useMemo, useState } from 'react';
-import { useNavigate, useSearchParams, Link } from 'react-router-dom';
+import { useLocation, useNavigate, Link } from 'react-router-dom';
 import {
   ArrowRight,
   Car,
@@ -26,7 +26,23 @@ const ECONOMIQUE_SCENE_SRC = new URL('../../economique.webp', import.meta.url).h
 const UTILITAIRE_SCENE_SRC = new URL('../../utilitaire.webp', import.meta.url).href;
 const DJAMBO_PREMIUM_SCENE_SRC = new URL('../../Marque haut de gamme Djambo.png', import.meta.url).href;
 
-const MAX_PRICE = 150000;
+const FALLBACK_MAX_PRICE = 150000;
+
+const buildDefaultFilters = (maxPrice: number): SearchFilters => ({
+  city: '',
+  category: '',
+  minPrice: 0,
+  maxPrice,
+  fuelType: '',
+  isForRent: false,
+  isForSale: false,
+  transmission: '',
+});
+
+const getPriceRangeMax = (vehicles: MarketplacePublicVehicle[]) => {
+  const highestPrice = vehicles.reduce((maxPrice, vehicle) => Math.max(maxPrice, vehicle.pricePerDay || 0), 0);
+  return Math.max(FALLBACK_MAX_PRICE, highestPrice);
+};
 
 const CATEGORY_ORDER: VehicleCategory[] = [
   VehicleCategory.LUXE,
@@ -105,17 +121,6 @@ const CATEGORY_SCENE_IMAGE: Record<string, string> = {
   [VehicleCategory.UTILITAIRE]: UTILITAIRE_SCENE_SRC,
   [VehicleCategory.CABRIOLET]: DJAMBO_PREMIUM_SCENE_SRC,
   [VehicleCategory.MONOSPACE]: UTILITAIRE_SCENE_SRC,
-};
-
-const defaultFilters: SearchFilters = {
-  city: '',
-  category: '',
-  minPrice: 0,
-  maxPrice: MAX_PRICE,
-  fuelType: '',
-  isForRent: true,
-  isForSale: false,
-  transmission: '',
 };
 
 const SORT_OPTIONS = [
@@ -280,22 +285,27 @@ const VehicleCard = ({ vehicle, onClick, onPreview }: { vehicle: MarketplacePubl
 );
 
 export const VehicleSearchPage: React.FC = () => {
-  const [searchParams] = useSearchParams();
+  const location = useLocation();
   const navigate = useNavigate();
   const [mobileMenuOpen, setMobileMenuOpen] = useState(false);
   const [activeLanguage, setActiveLanguage] = useState('FR');
-  const [filters, setFilters] = useState<SearchFilters>({
-    ...defaultFilters,
-    city: searchParams.get('city') || '',
-    category: (searchParams.get('category') as VehicleCategory) || '',
-  });
+  const [filters, setFilters] = useState<SearchFilters>(() => buildDefaultFilters(FALLBACK_MAX_PRICE));
   const [showFilters, setShowFilters] = useState(false);
   const [sortBy, setSortBy] = useState<'catalogue' | 'price_asc' | 'price_desc' | 'rating' | 'newest'>('catalogue');
-  const [searchInput, setSearchInput] = useState(searchParams.get('city') || '');
+  const [searchInput, setSearchInput] = useState('');
   const [previewVehicle, setPreviewVehicle] = useState<MarketplacePublicVehicle | null>(null);
   const [marketplaceVehicles, setMarketplaceVehicles] = useState<MarketplacePublicVehicle[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
+  const priceRangeMaxRef = React.useRef(FALLBACK_MAX_PRICE);
+
+  useEffect(() => {
+    if (!location.search) {
+      return;
+    }
+
+    navigate(location.pathname, { replace: true });
+  }, [location.pathname, location.search, navigate]);
 
   useEffect(() => {
     let isMounted = true;
@@ -328,14 +338,61 @@ export const VehicleSearchPage: React.FC = () => {
     };
   }, []);
 
+  const priceRangeMax = useMemo(
+    () => getPriceRangeMax(marketplaceVehicles),
+    [marketplaceVehicles]
+  );
+
+  useEffect(() => {
+    const previousPriceRangeMax = priceRangeMaxRef.current;
+
+    setFilters((currentFilters) => {
+      const shouldTrackDefaultRange = currentFilters.maxPrice === previousPriceRangeMax;
+      const nextMaxPrice = shouldTrackDefaultRange
+        ? priceRangeMax
+        : Math.min(currentFilters.maxPrice, priceRangeMax);
+
+      if (nextMaxPrice === currentFilters.maxPrice) {
+        return currentFilters;
+      }
+
+      return {
+        ...currentFilters,
+        maxPrice: nextMaxPrice,
+      };
+    });
+
+    priceRangeMaxRef.current = priceRangeMax;
+  }, [priceRangeMax]);
+
   const cityOptions = useMemo(() => [...new Set(marketplaceVehicles.map((vehicle) => vehicle.city))], [marketplaceVehicles]);
 
   const setFilter = <K extends keyof SearchFilters>(key: K, value: SearchFilters[K]) => {
     setFilters((prev) => ({ ...prev, [key]: value }));
   };
 
+  const toggleOfferFilter = (mode: 'rent' | 'sale') => {
+    setFilters((prev) => {
+      if (mode === 'rent') {
+        const nextRent = !prev.isForRent;
+        return {
+          ...prev,
+          isForRent: nextRent,
+          isForSale: nextRent ? false : prev.isForSale,
+        };
+      }
+
+      const nextSale = !prev.isForSale;
+      return {
+        ...prev,
+        isForSale: nextSale,
+        isForRent: nextSale ? false : prev.isForRent,
+      };
+    });
+  };
+
   const resetFilters = () => {
-    setFilters({ ...defaultFilters });
+    setFilters(buildDefaultFilters(priceRangeMax));
     setSearchInput('');
   };
 
@@ -416,7 +473,8 @@ export const VehicleSearchPage: React.FC = () => {
     filters.category ||
     filters.fuelType ||
     filters.transmission ||
-    filters.maxPrice < MAX_PRICE ||
+    filters.maxPrice < priceRangeMax ||
+    filters.isForRent ||
     filters.isForSale
   );
 
@@ -426,7 +484,8 @@ export const VehicleSearchPage: React.FC = () => {
     Boolean(filters.category),
     Boolean(filters.fuelType),
     Boolean(filters.transmission),
-    filters.maxPrice < MAX_PRICE,
+    filters.maxPrice < priceRangeMax,
+    filters.isForRent,
     filters.isForSale,
   ].filter(Boolean).length;
 
@@ -436,14 +495,16 @@ export const VehicleSearchPage: React.FC = () => {
     filters.category ? { key: 'category', label: `Categorie: ${filters.category}`, onRemove: () => setFilter('category', '') } : null,
     filters.fuelType ? { key: 'fuelType', label: `Carburant: ${filters.fuelType}`, onRemove: () => setFilter('fuelType', '') } : null,
     filters.transmission ? { key: 'transmission', label: `Boite: ${filters.transmission}`, onRemove: () => setFilter('transmission', '') } : null,
-    filters.maxPrice < MAX_PRICE ? { key: 'price', label: `Budget max: ${filters.maxPrice.toLocaleString()} FCFA`, onRemove: () => setFilter('maxPrice', MAX_PRICE) } : null,
+    filters.maxPrice < priceRangeMax ? { key: 'price', label: `Budget max: ${filters.maxPrice.toLocaleString()} FCFA`, onRemove: () => setFilter('maxPrice', priceRangeMax) } : null,
+    filters.isForRent ? {
+      key: 'rent',
+      label: 'Mode: Location',
+      onRemove: () => setFilter('isForRent', false),
+    } : null,
     filters.isForSale ? {
       key: 'sale',
       label: 'Mode: Vente',
-      onRemove: () => {
-        setFilter('isForSale', false);
-        setFilter('isForRent', true);
-      },
+      onRemove: () => setFilter('isForSale', false),
     } : null,
   ].filter((chip): chip is { key: string; label: string; onRemove: () => void } => Boolean(chip));
 
@@ -672,7 +733,7 @@ export const VehicleSearchPage: React.FC = () => {
 
             <div className="mt-3 overflow-x-auto pb-1 [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden">
               <div className="flex min-w-max gap-2">
-                {CATEGORY_ORDER.slice(0, 6).map((category) => (
+                {CATEGORY_ORDER.map((category) => (
                 <button
                   key={category}
                   type="button"
@@ -721,7 +782,7 @@ export const VehicleSearchPage: React.FC = () => {
                   <input
                     type="range"
                     min={0}
-                    max={MAX_PRICE}
+                    max={priceRangeMax}
                     step={5000}
                     value={filters.maxPrice}
                     onChange={(event) => setFilter('maxPrice', Number(event.target.value))}
@@ -732,10 +793,7 @@ export const VehicleSearchPage: React.FC = () => {
                 <div className="grid grid-cols-2 gap-2 xl:col-span-2">
                   <button
                     type="button"
-                    onClick={() => {
-                      setFilter('isForRent', true);
-                      setFilter('isForSale', false);
-                    }}
+                    onClick={() => toggleOfferFilter('rent')}
                     className={
                       'border px-4 py-3 text-sm font-semibold transition-colors ' +
                       (filters.isForRent && !filters.isForSale
@@ -747,10 +805,7 @@ export const VehicleSearchPage: React.FC = () => {
                   </button>
                   <button
                     type="button"
-                    onClick={() => {
-                      setFilter('isForSale', true);
-                      setFilter('isForRent', false);
-                    }}
+                    onClick={() => toggleOfferFilter('sale')}
                     className={
                       'border px-4 py-3 text-sm font-semibold transition-colors ' +
                       (filters.isForSale && !filters.isForRent

@@ -2,18 +2,23 @@ import React, { useEffect, useMemo, useState } from 'react';
 import { Link, useLocation, useNavigate } from 'react-router-dom';
 import { jsPDF } from 'jspdf';
 import {
+  ArrowRight,
+  BadgeCheck,
   Calendar,
   Car,
   CheckCircle,
+  Clock3,
   Copy,
   CreditCard,
   FileText,
   Link as LinkIcon,
   Loader2,
+  Phone,
   Search,
   ShieldCheck,
   User,
   Users,
+  Wallet,
 } from 'lucide-react';
 import { useAuth } from '../contexts/AuthContext';
 import {
@@ -83,6 +88,8 @@ export const ContractManager: React.FC = () => {
   const [pageLoading, setPageLoading] = useState(true);
   const [error, setError] = useState('');
   const [prefillNotice, setPrefillNotice] = useState('');
+  const [highlightedContractId, setHighlightedContractId] = useState('');
+  const [contractActionId, setContractActionId] = useState('');
 
   useEffect(() => {
     let isMounted = true;
@@ -155,6 +162,26 @@ export const ContractManager: React.FC = () => {
     navigate({ pathname: location.pathname, search: cleanedSearch.toString() }, { replace: true });
   }, [customers, location.pathname, location.search, navigate]);
 
+  useEffect(() => {
+    if (!contractList.length) {
+      return;
+    }
+
+    const searchParams = new URLSearchParams(location.search);
+    const contractIdFromQuery = searchParams.get('contract') || '';
+    if (!contractIdFromQuery) {
+      return;
+    }
+
+    const matchedContract = contractList.find((contract) => contract.id === contractIdFromQuery);
+    if (!matchedContract) {
+      return;
+    }
+
+    setHighlightedContractId(matchedContract.id);
+    setPrefillNotice(`Contrat retrouve: ${matchedContract.contractNumber || matchedContract.id}. Vous pouvez le telecharger, copier son lien ou preparer un nouveau dossier.`);
+  }, [contractList, location.search]);
+
   const availableVehicles = useMemo(() => vehicles.filter((vehicle) => vehicle.isAvailable), [vehicles]);
   const pickerCustomers = useMemo(() => {
     const knownCustomerIds = new Set(customers.map((customer) => customer.id));
@@ -193,6 +220,7 @@ export const ContractManager: React.FC = () => {
   const selectedCustomerObject = customers.find((customer) => customer.id === selectedCustomer);
   const selectedPickerCustomer = pickerCustomers.find((customer) => customer.id === selectedCustomer) || selectedCustomerObject;
   const selectedVehicleObject = vehicles.find((vehicle) => vehicle.id === selectedVehicle);
+  const highlightedContract = contractList.find((contract) => contract.id === highlightedContractId) || null;
 
   const days = useMemo(() => {
     if (!startDate || !endDate) {
@@ -207,6 +235,29 @@ export const ContractManager: React.FC = () => {
   const dailyRate = selectedVehicleObject?.pricePerDay || 0;
   const chauffeurTotal = chauffeurRequested ? chauffeurRate * Math.max(days, 1) : 0;
   const totalAmount = Math.max(days, 1) * dailyRate + chauffeurTotal;
+  const contractVisual = settings.contractBanner || CONTRACT_ILLUSTRATION_SRC;
+  const isOwnerSpace = user?.role === 'PARC_AUTO' || user?.role === 'PARTICULIER';
+
+  const handleContractUpdate = async (contractId: string, status: 'PENDING_PAYMENT' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED') => {
+    const responseMessage = window.prompt('Message a joindre a cette mise a jour (optionnel) :', '') || '';
+
+    try {
+      setContractActionId(contractId);
+      const updatedContract = await api.updateContract(contractId, { status, responseMessage });
+      setContractList((current) => current.map((contract) => contract.id === contractId ? {
+        ...contract,
+        status: updatedContract.status,
+        responseMessage: updatedContract.responseMessage ?? null,
+        respondedAt: updatedContract.respondedAt ?? null,
+        respondedByUserId: updatedContract.respondedByUserId ?? null,
+      } : contract));
+      setError('');
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'Impossible de mettre a jour le contrat.');
+    } finally {
+      setContractActionId('');
+    }
+  };
 
   const downloadContractPdf = (contract: ManagedContractRecord, customer?: CustomerSummary, vehicle?: OwnerInventoryVehicle) => {
     const resolvedCustomer = customer || customers.find((item) => item.id === contract.customerId);
@@ -371,13 +422,19 @@ export const ContractManager: React.FC = () => {
     addKeyValue('Mode de paiement', paymentReference);
     addKeyValue('Montant total contractuel', `${contract.totalAmount.toLocaleString()} FCFA`);
 
-    addSectionTitle('5. Corps du contrat');
+    addSectionTitle('5. Encadrement du service');
+    addKeyValue('Support operationnel', `${ownerEmail}${ownerPhone !== 'Non renseigne' ? ` • ${ownerPhone}` : ''}`);
+    addKeyValue('Delai de coordination', settings.responseTime || 'Reponse rapide');
+    addKeyValue('Livraison / remise', settings.deliveryEnabled ? 'Service active selon disponibilite et validation interne.' : 'Remise standard au point de retrait convenu.');
+    addKeyValue('Signature', settings.contractSignatureEnabled ? 'Le dossier est prevu pour un parcours de signature et de validation.' : 'Validation contractuelle sur base documentaire standard.');
+
+    addSectionTitle('6. Corps du contrat');
     addParagraph('Le vehicule est remis propre, avec ses documents de bord et un niveau de carburant equivalent a celui qui devra etre constate a la restitution. Toute anomalie visible doit etre signalee au moment de la remise.');
     addParagraph('Le client s engage a utiliser le vehicule conformement a sa destination, a respecter les lois de circulation en vigueur et a informer sans delai Djambo de tout incident, immobilisation ou retard affectant le service.');
     addParagraph('Toute prolongation de location doit faire l objet d une validation prealable ecrite. A defaut, la disponibilite du vehicule, la couverture et l organisation logistique ne peuvent etre garanties.');
     addParagraph('Le client demeure responsable des contraventions, degradations hors usure normale, pertes d accessoires ou frais engages durant la periode contractuelle. Les frais additionnels justifies pourront faire l objet d une regularisation complementaire.');
 
-    addSectionTitle('6. Validation et signatures');
+    addSectionTitle('7. Validation et signatures');
     addParagraph(`Le dossier est emis en statut ${contract.status}. La reference contractuelle ${contract.contractNumber || contract.id} fait foi pour toute correspondance, verification interne ou suivi administratif.`);
     ensureSpace(28);
     document.setDrawColor('#cbd5e1');
@@ -508,6 +565,87 @@ export const ContractManager: React.FC = () => {
           {prefillNotice}
         </div>
       )}
+
+      <section className="overflow-hidden rounded-[32px] border border-slate-200 bg-white shadow-sm">
+        <div className="grid gap-0 xl:grid-cols-[1.08fr_0.92fr]">
+          <div className="p-6 sm:p-8">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-slate-400">Contrats intelligents</p>
+            <h1 className="mt-3 max-w-2xl text-3xl font-extrabold tracking-tight text-slate-950 sm:text-4xl">
+              Preparez un dossier clair, exportez le PDF et gardez chaque contrat sous controle.
+            </h1>
+            <p className="mt-4 max-w-2xl text-sm leading-relaxed text-slate-600 sm:text-base">
+              Le parcours est organise en trois temps: selection du client, cadrage financier, puis emission du dossier. Le moteur de creation reste le meme, mais la lecture et le suivi sont plus directs.
+            </p>
+
+            <div className="mt-6 grid gap-3 md:grid-cols-3">
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-900 ring-1 ring-slate-200">
+                  <User size={16} />
+                </div>
+                <p className="mt-3 text-sm font-bold text-slate-900">1. Client confirme</p>
+                <p className="mt-1 text-sm text-slate-500">Choisissez un client existant ou arrive depuis la fiche client preselectionnee.</p>
+              </div>
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-900 ring-1 ring-slate-200">
+                  <Wallet size={16} />
+                </div>
+                <p className="mt-3 text-sm font-bold text-slate-900">2. Cout cadre</p>
+                <p className="mt-1 text-sm text-slate-500">Le total se met a jour selon la duree, le vehicule et l option chauffeur.</p>
+              </div>
+              <div className="rounded-[24px] border border-slate-200 bg-slate-50 p-4">
+                <div className="inline-flex h-9 w-9 items-center justify-center rounded-full bg-white text-slate-900 ring-1 ring-slate-200">
+                  <BadgeCheck size={16} />
+                </div>
+                <p className="mt-3 text-sm font-bold text-slate-900">3. PDF emis</p>
+                <p className="mt-1 text-sm text-slate-500">Le contrat est enregistre puis exporte avec les informations de service utiles.</p>
+              </div>
+            </div>
+
+            <div className="mt-6 flex flex-wrap gap-3">
+              <div className="rounded-full bg-slate-950 px-4 py-2 text-sm font-semibold text-white">
+                {contractList.length} contrat{contractList.length > 1 ? 's' : ''} emis
+              </div>
+              <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
+                {availableVehicles.length} vehicule{availableVehicles.length > 1 ? 's' : ''} disponible{availableVehicles.length > 1 ? 's' : ''}
+              </div>
+              <div className="rounded-full border border-slate-200 bg-white px-4 py-2 text-sm font-semibold text-slate-700">
+                {pickerCustomers.length} client{pickerCustomers.length > 1 ? 's' : ''} mobilisable{pickerCustomers.length > 1 ? 's' : ''}
+              </div>
+            </div>
+          </div>
+
+          <div className="relative min-h-[320px] border-t border-slate-200 bg-slate-950 xl:border-l xl:border-t-0">
+            <img src={contractVisual} alt="Univers contrat Djambo" className="absolute inset-0 h-full w-full object-cover opacity-55" />
+            <div className="absolute inset-0 bg-[linear-gradient(135deg,rgba(15,23,42,0.88)_0%,rgba(15,23,42,0.58)_48%,rgba(15,23,42,0.18)_100%)]" />
+            <div className="relative flex h-full flex-col justify-between p-6 text-white sm:p-8">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.22em] text-white/60">Dossier en vue</p>
+                <h2 className="mt-3 text-2xl font-extrabold tracking-tight">
+                  {highlightedContract ? `Contrat ${highlightedContract.contractNumber || highlightedContract.id}` : 'Votre prochain contrat se prepare ici'}
+                </h2>
+                <p className="mt-3 max-w-md text-sm leading-relaxed text-slate-200">
+                  {highlightedContract
+                    ? `Client ${highlightedContract.customerName || 'renseigne'} • ${highlightedContract.totalAmount.toLocaleString()} FCFA • ${new Date(highlightedContract.startDate).toLocaleDateString('fr-FR')} au ${new Date(highlightedContract.endDate).toLocaleDateString('fr-FR')}`
+                    : 'Un bon dossier doit etre simple a verifier, simple a partager et simple a retrouver sans refaire toute la manipulation.'}
+                </p>
+              </div>
+
+              <div className="grid gap-3 sm:grid-cols-2">
+                <div className="rounded-[24px] border border-white/10 bg-white/10 p-4 backdrop-blur">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/65">Support</p>
+                  <p className="mt-2 text-sm font-bold text-white">{settings.publicEmail}</p>
+                  <p className="mt-1 text-sm text-slate-200">{settings.supportPhone || 'Telephone support non renseigne'}</p>
+                </div>
+                <div className="rounded-[24px] border border-white/10 bg-white/10 p-4 backdrop-blur">
+                  <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-white/65">Cadence de service</p>
+                  <p className="mt-2 text-sm font-bold text-white">{settings.responseTime}</p>
+                  <p className="mt-1 text-sm text-slate-200">Signature {settings.contractSignatureEnabled ? 'activee' : 'standard'} • Livraison {settings.deliveryEnabled ? 'activee' : 'inactive'}</p>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </section>
 
       <div className="grid gap-6 xl:grid-cols-[1.05fr_0.95fr]">
         <section className="border border-slate-200 bg-white p-6 shadow-sm">
@@ -648,6 +786,21 @@ export const ContractManager: React.FC = () => {
           </div>
 
           <div className="space-y-4">
+            <div className="grid gap-3 sm:grid-cols-3">
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Duree</p>
+                <p className="mt-2 text-base font-extrabold text-slate-950">{days > 0 ? `${days} jour${days > 1 ? 's' : ''}` : '—'}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Tarif / jour</p>
+                <p className="mt-2 text-base font-extrabold text-slate-950">{selectedVehicleObject ? `${dailyRate.toLocaleString()} FCFA` : '—'}</p>
+              </div>
+              <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3">
+                <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-slate-400">Delai service</p>
+                <p className="mt-2 text-base font-extrabold text-slate-950">{settings.responseTime}</p>
+              </div>
+            </div>
+
             <div className="border border-slate-200 bg-slate-50 p-4">
               <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Client</p>
               <p className="mt-2 text-sm font-bold text-slate-900">{selectedPickerCustomer ? selectedPickerCustomer.fullName : 'Aucun client selectionne'}</p>
@@ -680,6 +833,33 @@ export const ContractManager: React.FC = () => {
               <p className="mt-2 text-sm font-bold">{paymentLabel[paymentMethod]}</p>
               <p className="mt-1 text-sm text-slate-300">Le contrat est prepare avec cette methode comme reference de reglement.</p>
             </div>
+
+            <div className="rounded-[26px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-slate-950 text-white">
+                  <Clock3 size={16} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Ce que le PDF inclut maintenant</p>
+                  <p className="mt-1 text-sm leading-relaxed text-slate-500">
+                    Parties contractantes, execution, conditions financieres, coordonnees de support, niveau de service et signature finale.
+                  </p>
+                </div>
+              </div>
+            </div>
+
+            <div className="rounded-[26px] border border-slate-200 bg-slate-50 p-4">
+              <div className="flex items-start gap-3">
+                <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-white text-slate-900 ring-1 ring-slate-200">
+                  <Phone size={16} />
+                </div>
+                <div>
+                  <p className="text-sm font-bold text-slate-900">Coordonnees de service</p>
+                  <p className="mt-1 text-sm text-slate-500">{settings.publicEmail}</p>
+                  <p className="mt-1 text-sm text-slate-500">{settings.supportPhone || 'Telephone support non renseigne'}</p>
+                </div>
+              </div>
+            </div>
           </div>
 
           <button
@@ -710,7 +890,7 @@ export const ContractManager: React.FC = () => {
             const customer = customers.find((item) => item.id === contract.customerId);
             const vehicle = vehicles.find((item) => item.id === contract.vehicleId);
             return (
-              <article key={contract.id} className="overflow-hidden rounded-[26px] border border-slate-200 bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-sm transition-shadow hover:shadow-md">
+              <article key={contract.id} className={`overflow-hidden rounded-[26px] border bg-[linear-gradient(180deg,#ffffff_0%,#f8fafc_100%)] shadow-sm transition-shadow hover:shadow-md ${highlightedContractId === contract.id ? 'border-sky-400 ring-2 ring-sky-100' : 'border-slate-200'}`}>
                 <div className="border-b border-slate-200 bg-slate-950 px-5 py-4 text-white">
                   <div className="flex flex-wrap items-center justify-between gap-3">
                     <div>
@@ -758,7 +938,22 @@ export const ContractManager: React.FC = () => {
                     </div>
                   </div>
 
+                  {(contract.responseMessage || contract.respondedAt) && (
+                    <div className="rounded-2xl border border-slate-200 bg-white px-4 py-3 text-sm text-slate-600">
+                      {contract.responseMessage && <p>{contract.responseMessage}</p>}
+                      {contract.respondedAt && <p className="mt-1 text-xs text-slate-400">Mise a jour le {new Date(contract.respondedAt).toLocaleString('fr-FR')}</p>}
+                    </div>
+                  )}
+
                   <div className="flex flex-wrap items-center gap-2 border-t border-slate-200 pt-4">
+                    <button
+                      type="button"
+                      onClick={() => setHighlightedContractId(contract.id)}
+                      className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                    >
+                      <ArrowRight size={15} />
+                      Voir dossier
+                    </button>
                     <button
                       type="button"
                       onClick={() => downloadContractPdf(contract, customer, vehicle)}
@@ -783,6 +978,43 @@ export const ContractManager: React.FC = () => {
                       {copiedContractId === contract.id ? <CheckCircle size={15} /> : <Copy size={15} />}
                       {copiedContractId === contract.id ? 'Copie' : 'Copier'}
                     </button>
+                    {isOwnerSpace ? (
+                      <>
+                        <button
+                          type="button"
+                          onClick={() => void handleContractUpdate(contract.id, 'PENDING_PAYMENT')}
+                          disabled={contractActionId === contract.id}
+                          className="inline-flex items-center gap-2 rounded-2xl border border-slate-200 bg-white px-4 py-2.5 text-sm font-semibold text-slate-700 hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <Wallet size={15} /> Paiement en attente
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleContractUpdate(contract.id, 'ACTIVE')}
+                          disabled={contractActionId === contract.id}
+                          className="inline-flex items-center gap-2 rounded-2xl bg-emerald-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <BadgeCheck size={15} /> Activer
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => void handleContractUpdate(contract.id, 'CANCELLED')}
+                          disabled={contractActionId === contract.id}
+                          className="inline-flex items-center gap-2 rounded-2xl bg-rose-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          <ShieldCheck size={15} /> Annuler
+                        </button>
+                      </>
+                    ) : (
+                      <button
+                        type="button"
+                        onClick={() => void handleContractUpdate(contract.id, 'COMPLETED')}
+                        disabled={contractActionId === contract.id}
+                        className="inline-flex items-center gap-2 rounded-2xl bg-slate-900 px-4 py-2.5 text-sm font-semibold text-white hover:bg-slate-800 disabled:cursor-not-allowed disabled:opacity-60"
+                      >
+                        <CheckCircle size={15} /> Confirmer la fin
+                      </button>
+                    )}
                   </div>
                 </div>
               </article>

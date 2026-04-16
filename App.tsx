@@ -7,6 +7,7 @@ import {
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AIAssistant } from './components/AIAssistant';
 import { BrandLogo } from './components/BrandLogo';
+import { enablePushNotifications, disablePushNotifications, getBrowserPushState, syncExistingPushSubscription } from './services/pushNotifications';
 import { LandingPage } from './components/LandingPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { RegisterPage } from './components/auth/RegisterPage';
@@ -28,6 +29,8 @@ const VehicleDetailPage = React.lazy(() => import('./components/marketplace/Vehi
 const OwnerProfilePage = React.lazy(() => import('./components/marketplace/OwnerProfilePage').then(module => ({ default: module.OwnerProfilePage })));
 const OwnerDashboard = React.lazy(() => import('./components/owner/OwnerDashboard').then(module => ({ default: module.OwnerDashboard })));
 const SettingsPage = React.lazy(() => import('./components/SettingsPage').then(module => ({ default: module.SettingsPage })));
+const AboutPage = React.lazy(() => import('./components/legal/AboutPage').then(module => ({ default: module.AboutPage })));
+const LegalNoticePage = React.lazy(() => import('./components/legal/LegalNoticePage').then(module => ({ default: module.LegalNoticePage })));
 const CookiePolicyPage = React.lazy(() => import('./components/legal/CookiePolicyPage').then(module => ({ default: module.CookiePolicyPage })));
 const PrivacyPolicyPage = React.lazy(() => import('./components/legal/PrivacyPolicyPage').then(module => ({ default: module.PrivacyPolicyPage })));
 const TermsOfUsePage = React.lazy(() => import('./components/legal/TermsOfUsePage').then(module => ({ default: module.TermsOfUsePage })));
@@ -144,6 +147,12 @@ const Sidebar = ({ isOpen, toggleSidebar }: { isOpen: boolean; toggleSidebar: ()
 const Header = ({ toggleSidebar }: { toggleSidebar: () => void }) => {
   const location = useLocation();
   const { user } = useAuth();
+  const [pushPermission, setPushPermission] = useState<NotificationPermission | 'unsupported'>('unsupported');
+  const [pushEnabled, setPushEnabled] = useState(false);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [showPushPrompt, setShowPushPrompt] = useState(false);
+
+  const pushPromptDismissKey = user ? `djambo_push_prompt_dismissed:${user.id}` : null;
 
   const routeMeta = React.useMemo(() => {
     if (location.pathname.includes('/app/contracts')) {
@@ -163,6 +172,98 @@ const Header = ({ toggleSidebar }: { toggleSidebar: () => void }) => {
     }
     return { title: 'Tableau de bord', description: 'Vue d ensemble des operations, revenus et disponibilites.' };
   }, [location.pathname]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncPushState = async () => {
+      if (!user) {
+        if (isMounted) {
+          setPushPermission('unsupported');
+          setPushEnabled(false);
+          setShowPushPrompt(false);
+        }
+        return;
+      }
+
+      const currentState = await getBrowserPushState();
+      if (!isMounted) {
+        return;
+      }
+
+      setPushPermission(currentState.permission);
+
+      if (currentState.permission === 'granted') {
+        const synced = await syncExistingPushSubscription().catch(() => false);
+        if (isMounted) {
+          setPushEnabled(synced || currentState.subscribed);
+          setShowPushPrompt(false);
+        }
+        return;
+      }
+
+      setPushEnabled(currentState.subscribed);
+
+       if (!currentState.supported || currentState.permission === 'denied') {
+        setShowPushPrompt(false);
+        return;
+      }
+
+      const dismissed = pushPromptDismissKey
+        ? window.localStorage.getItem(pushPromptDismissKey) === '1'
+        : false;
+
+      setShowPushPrompt(!dismissed && !currentState.subscribed);
+    };
+
+    void syncPushState();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
+
+  const handlePushToggle = async () => {
+    if (!user || pushBusy) {
+      return;
+    }
+
+    try {
+      setPushBusy(true);
+
+      if (pushEnabled) {
+        await disablePushNotifications();
+      } else {
+        await enablePushNotifications();
+      }
+
+      const refreshedState = await getBrowserPushState();
+      setPushPermission(refreshedState.permission);
+      setPushEnabled(refreshedState.subscribed);
+      setShowPushPrompt(false);
+
+      if (pushPromptDismissKey) {
+        window.localStorage.removeItem(pushPromptDismissKey);
+      }
+    } catch (error) {
+      window.alert(error instanceof Error ? error.message : 'Impossible de mettre a jour les notifications push.');
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const dismissPushPrompt = () => {
+    if (pushPromptDismissKey) {
+      window.localStorage.setItem(pushPromptDismissKey, '1');
+    }
+    setShowPushPrompt(false);
+  };
+
+  const pushButtonTitle = pushEnabled
+    ? 'Notifications push actives. Cliquez pour desactiver sur cet appareil.'
+    : pushPermission === 'denied'
+      ? 'Les notifications sont bloquees dans le navigateur.'
+      : 'Activer les notifications push sur cet appareil.';
   
   return (
     <header className="sticky top-0 z-10 bg-[linear-gradient(180deg,rgba(248,250,252,0.96),rgba(248,250,252,0.86))] px-4 shadow-[0_10px_35px_rgba(15,23,42,0.06)] backdrop-blur-xl lg:px-8">
@@ -200,9 +301,26 @@ const Header = ({ toggleSidebar }: { toggleSidebar: () => void }) => {
           Parametres
         </Link>
         </nav>
-        <button className="relative bg-white/80 p-2.5 text-slate-500 shadow-sm transition-colors hover:text-slate-900">
-          <Bell size={20} />
-          <span className="absolute top-1.5 right-1.5 w-2 h-2 bg-rose-500 rounded-full border-2 border-white"></span>
+        <button
+          type="button"
+          onClick={() => void handlePushToggle()}
+          title={pushButtonTitle}
+          className={
+            'relative bg-white/80 p-2.5 shadow-sm transition-colors ' +
+            (pushEnabled
+              ? 'text-emerald-600 hover:text-emerald-700'
+              : 'text-slate-500 hover:text-slate-900')
+          }
+        >
+          {pushBusy ? <Loader2 size={20} className="animate-spin" /> : <Bell size={20} />}
+          <span className={
+            'absolute top-1.5 right-1.5 h-2 w-2 rounded-full border-2 border-white ' +
+            (pushEnabled
+              ? 'bg-emerald-500'
+              : pushPermission === 'denied'
+                ? 'bg-rose-500'
+                : 'bg-amber-400')
+          }></span>
         </button>
         <div className="flex items-center gap-3 bg-white/80 px-2.5 py-2 shadow-sm">
             <div className="flex h-9 w-9 items-center justify-center bg-indigo-100 text-sm font-bold text-indigo-700">
@@ -215,6 +333,33 @@ const Header = ({ toggleSidebar }: { toggleSidebar: () => void }) => {
         </div>
       </div>
       </div>
+      {showPushPrompt && (
+        <div className="mb-4 flex flex-col gap-3 border border-emerald-200 bg-emerald-50/90 px-4 py-4 text-sm text-emerald-950 shadow-sm lg:flex-row lg:items-center lg:justify-between">
+          <div>
+            <p className="font-bold">Activez les notifications push</p>
+            <p className="mt-1 text-emerald-900/80">
+              Recevez tout de suite les reponses aux demandes de vehicule, les mises a jour de contrat et les nouvelles alertes Djambo sur cet appareil.
+            </p>
+          </div>
+          <div className="flex flex-col gap-2 sm:flex-row">
+            <button
+              type="button"
+              onClick={() => void handlePushToggle()}
+              disabled={pushBusy}
+              className="inline-flex items-center justify-center bg-emerald-600 px-4 py-2.5 font-semibold text-white transition-colors hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+            >
+              {pushBusy ? 'Activation...' : 'Activer maintenant'}
+            </button>
+            <button
+              type="button"
+              onClick={dismissPushPrompt}
+              className="inline-flex items-center justify-center bg-white px-4 py-2.5 font-semibold text-emerald-900 ring-1 ring-emerald-200 transition-colors hover:bg-emerald-100"
+            >
+              Plus tard
+            </button>
+          </div>
+        </div>
+      )}
     </header>
   );
 };
@@ -375,6 +520,16 @@ const AppContent = () => {
         <Route path="/register" element={<RegisterPage />} />
         <Route path="/forgot-password" element={<ForgotPasswordPage />} />
         <Route path="/reset-password" element={<ResetPasswordPage />} />
+        <Route path="/about" element={
+          <Suspense fallback={<PageLoader />}>
+            <AboutPage />
+          </Suspense>
+        } />
+        <Route path="/legal" element={
+          <Suspense fallback={<PageLoader />}>
+            <LegalNoticePage />
+          </Suspense>
+        } />
         <Route path="/cookies" element={
           <Suspense fallback={<PageLoader />}>
             <CookiePolicyPage />

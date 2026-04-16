@@ -1,7 +1,17 @@
-const APP_SHELL_CACHE = 'fleet-command-shell-v2';
-const RUNTIME_CACHE = 'fleet-command-runtime-v2';
-const IMAGE_CACHE = 'fleet-command-images-v2';
-const urlsToCache = ['./', './index.html', './manifest.json'];
+const APP_SHELL_CACHE = 'djambo-shell-v3';
+const RUNTIME_CACHE = 'djambo-runtime-v3';
+const IMAGE_CACHE = 'djambo-images-v3';
+const urlsToCache = [
+  '/',
+  '/index.html',
+  '/site.webmanifest',
+  '/favicon.svg',
+  '/favicon.ico',
+  '/favicon-96x96.png',
+  '/apple-touch-icon.png',
+  '/icon-192.png',
+  '/icon-512.png',
+];
 
 self.addEventListener('install', (event) => {
   event.waitUntil(
@@ -62,7 +72,48 @@ self.addEventListener('fetch', (event) => {
 
   if (requestUrl.origin === self.location.origin && event.request.mode === 'navigate') {
     event.respondWith(
-      fetch(event.request).catch(() => caches.match('./index.html'))
+      fetch(event.request).catch(() => caches.match('/index.html'))
     );
   }
+});
+
+self.addEventListener('push', (event) => {
+  const payload = (() => {
+    try {
+      return event.data ? event.data.json() : {};
+    } catch {
+      return {};
+    }
+  })();
+
+  const title = payload.title || 'Djambo';
+  const body = payload.body || 'Une nouvelle mise a jour est disponible.';
+
+  event.waitUntil(self.registration.showNotification(title, {
+    body,
+    icon: payload.icon || '/icon-192.png',
+    badge: payload.badge || '/favicon-96x96.png',
+    tag: payload.tag || 'djambo-notification',
+    data: {
+      url: payload.url || '/#/app/dashboard',
+      ...(payload.data || {}),
+    },
+  }));
+});
+
+self.addEventListener('notificationclick', (event) => {
+  event.notification.close();
+
+  const targetUrl = event.notification.data?.url || '/#/app/dashboard';
+
+  event.waitUntil(
+    self.clients.matchAll({ type: 'window', includeUncontrolled: true }).then((clients) => {
+      const matchingClient = clients.find((client) => 'focus' in client);
+      if (matchingClient) {
+        return matchingClient.navigate(targetUrl).then(() => matchingClient.focus());
+      }
+
+      return self.clients.openWindow(targetUrl);
+    })
+  );
 });

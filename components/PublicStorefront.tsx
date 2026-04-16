@@ -121,7 +121,7 @@ export const PublicStorefront: React.FC = () => {
            </div>
            
            <div className="hidden sm:flex items-center gap-4 text-sm font-medium text-slate-600">
-               <a href="#" className="hover:text-slate-900">À propos</a>
+               <Link to="/about" className="hover:text-slate-900">À propos</Link>
                <Link to="/terms" className="hover:text-slate-900">Conditions</Link>
                <a href="#" className="bg-slate-900 text-white px-4 py-2 rounded-lg hover:bg-slate-800 transition-colors">
                    <Phone size={16} className="inline mr-2" />

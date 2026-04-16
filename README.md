@@ -37,6 +37,13 @@ Exemple minimal dans [/.env.example](.env.example) :
 - `GOOGLE_CLIENT_ID`
 - `GOOGLE_CLIENT_SECRET`
 - `VITE_API_BASE_URL`
+- `OPEN_AI_CHAT_BOT`
+- `OPENROUTER_API_KEY`
+- `OPENROUTER_MODEL`
+- `AI_CACHE_TTL_MS`
+- `WEB_PUSH_PUBLIC_KEY`
+- `WEB_PUSH_PRIVATE_KEY`
+- `WEB_PUSH_SUBJECT`
 
 Variables optionnelles pour les uploads photo parking/vehicule via Cloudflare R2 :
 
@@ -99,7 +106,29 @@ Frontend Render :
 6. `ALLOWED_ORIGINS=https://djambo-app.com,https://www.djambo-app.com`
 7. `GOOGLE_CLIENT_ID`
 8. `GOOGLE_CLIENT_SECRET`
+9. `OPEN_AI_CHAT_BOT`
+10. `OPENROUTER_MODEL=google/gemini-2.0-flash-001`
+11. `AI_CACHE_TTL_MS=21600000`
+12. `WEB_PUSH_PUBLIC_KEY`
+13. `WEB_PUSH_PRIVATE_KEY`
+14. `WEB_PUSH_SUBJECT=mailto:support@djambo-app.com`
 9. `PORT` sera injecté automatiquement par Render
+
+Le chatbot FleetMind passe par le backend et n expose plus de cle IA au frontend. La variable privilegiee cote Render peut etre `OPEN_AI_CHAT_BOT`; `OPENROUTER_API_KEY` reste acceptee comme alias.
+
+Strategie anti-gaspillage integree :
+
+1. Les salutations et questions frequentes sont traitees localement sans appel modele.
+2. Les demandes recentes identiques sont reservees via un cache court cote API.
+3. Le contexte envoye au modele est compact pour limiter les tokens.
+4. Les reponses sont volontairement courtes pour reduire le cout par interaction.
+
+Notifications push web :
+
+1. Les notifications internes persistantes restent stockees en base dans `app_notifications`.
+2. Les notifications push web se branchent au-dessus via des abonnements navigateur lies a la session utilisateur.
+3. Les evenements couverts incluent les demandes vehicule, les reponses vendeur/client, les contrats et les premieres visites de profil proprietaire.
+4. Pour activer le push en production, il faut definir les cles VAPID `WEB_PUSH_PUBLIC_KEY` et `WEB_PUSH_PRIVATE_KEY` cote backend Render.
 
 Pour activer plus tard les uploads de photos parking/vehicule depuis le backend Render, ajoutez aussi :
 

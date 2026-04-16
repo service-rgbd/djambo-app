@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { UserRole } from '../types';
-import { api, RegisterPayload, RegisterResponse } from '../services/api';
+import { api, onAuthExpired, persistStoredUser, RegisterPayload, RegisterResponse } from '../services/api';
+import { disablePushNotifications } from '../services/pushNotifications';
 
 interface User {
   id: string;
@@ -9,6 +10,8 @@ interface User {
   role: UserRole;
   phone?: string;
   profileImage?: string;
+  authToken?: string;
+  sessionExpiresAt?: string;
 }
 
 interface AuthContextType {
@@ -16,7 +19,7 @@ interface AuthContextType {
   isAuthenticated: boolean;
   login: (email: string, password: string) => Promise<void>;
   register: (payload: RegisterPayload) => Promise<RegisterResponse>;
-  logout: () => void;
+  logout: () => Promise<void>;
   isLoading: boolean;
 }
 
@@ -29,27 +32,42 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   useEffect(() => {
     const storedUser = localStorage.getItem('fleet_user');
     if (storedUser) {
-      setUser(JSON.parse(storedUser));
+      const parsedUser = JSON.parse(storedUser) as User;
+      if (parsedUser.authToken && (!parsedUser.sessionExpiresAt || new Date(parsedUser.sessionExpiresAt).getTime() > Date.now())) {
+        setUser(parsedUser);
+      } else {
+        persistStoredUser(null);
+      }
     }
     setIsLoading(false);
   }, []);
 
+  useEffect(() => onAuthExpired(() => {
+    setUser(null);
+  }), []);
+
   const login = async (email: string, password: string) => {
     const authenticatedUser = await api.login(email, password);
     setUser(authenticatedUser);
-    localStorage.setItem('fleet_user', JSON.stringify(authenticatedUser));
+    persistStoredUser(authenticatedUser);
   };
 
   const register = async (payload: RegisterPayload) => {
     const registration = await api.register(payload);
     setUser(null);
-    localStorage.removeItem('fleet_user');
+    persistStoredUser(null);
     return registration;
   };
 
-  const logout = () => {
+  const logout = async () => {
+    try {
+      await disablePushNotifications().catch(() => false);
+      await api.logout();
+    } catch {
+      // Local cleanup still applies even if the remote session is already invalid.
+    }
     setUser(null);
-    localStorage.removeItem('fleet_user');
+    persistStoredUser(null);
   };
 
   return (

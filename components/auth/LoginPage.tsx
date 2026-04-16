@@ -29,7 +29,7 @@ export const LoginPage: React.FC = () => {
   };
 
   return (
-    <div className="min-h-screen bg-[#f7f5f0] font-sans lg:flex lg:h-screen lg:overflow-hidden">
+    <div className="notranslate min-h-screen bg-[#f7f5f0] font-sans lg:flex lg:h-screen lg:overflow-hidden" translate="no">
       <div className="relative z-10 flex flex-1 flex-col overflow-hidden bg-[radial-gradient(circle_at_top,#ffffff_0%,#f8f5ef_52%,#f2eee7_100%)] px-4 py-4 sm:px-6 lg:w-[42%] lg:flex-none lg:px-12 xl:px-16">
         <div className="absolute inset-0 opacity-40" style={{ backgroundImage: 'linear-gradient(rgba(15,23,42,0.04) 1px, transparent 1px), linear-gradient(90deg, rgba(15,23,42,0.04) 1px, transparent 1px)', backgroundSize: '28px 28px' }} />
         <Link to="/" className="relative z-10 inline-flex w-fit items-center gap-2 text-sm font-medium text-slate-500 transition-colors hover:text-indigo-600">
@@ -44,7 +44,7 @@ export const LoginPage: React.FC = () => {
             <p className="mt-2 text-sm text-slate-500">Email et mot de passe.</p>
           </div>
 
-          <form className="space-y-4" onSubmit={handleSubmit}>
+          <form className="space-y-4" onSubmit={handleSubmit} translate="no">
                 {error && (
                     <div className="flex items-start gap-3 rounded-2xl bg-rose-50 p-3 text-sm text-rose-600 animate-fade-in">
                         <div className="p-0.5 mt-0.5"><div className="w-1.5 h-1.5 rounded-full bg-rose-500"></div></div>
@@ -107,16 +107,14 @@ export const LoginPage: React.FC = () => {
                   <button
                     type="submit"
                     disabled={isSubmitting}
+                    translate="no"
                     className="group relative flex w-full justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-slate-400"
                   >
-                    {isSubmitting ? (
-                        <Loader2 className="animate-spin h-5 w-5" />
-                    ) : (
-                        <>
-                        Se connecter
-                        <ArrowRight className="ml-2 h-4 w-4 group-hover:translate-x-1 transition-transform" />
-                        </>
-                    )}
+                    <span className="inline-flex items-center justify-center gap-2">
+                      <Loader2 className={'h-5 w-5 ' + (isSubmitting ? 'animate-spin' : 'hidden')} />
+                      <span>{isSubmitting ? 'Connexion...' : 'Se connecter'}</span>
+                      <ArrowRight className={'h-4 w-4 transition-transform group-hover:translate-x-1 ' + (isSubmitting ? 'hidden' : '')} />
+                    </span>
                   </button>
                 </div>
           </form>

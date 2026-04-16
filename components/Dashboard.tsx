@@ -12,6 +12,7 @@ import {
 import {
   Activity,
   ArrowUpRight,
+  BellRing,
   Car,
   Clock3,
   Check,
@@ -25,7 +26,7 @@ import {
 } from 'lucide-react';
 import { FleetStats, RevenueData } from '../types';
 import { useAuth } from '../contexts/AuthContext';
-import { api, OwnerVehicleSummary } from '../services/api';
+import { api, OwnerNotificationSummary, OwnerVehicleSummary, PrivateAppSettings } from '../services/api';
 
 interface DashboardProps {
   stats?: FleetStats & { availableVehicles?: number; totalParkings?: number };
@@ -105,16 +106,23 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
   const [dashboardStats, setDashboardStats] = useState<FleetStats & { availableVehicles?: number; totalParkings?: number } | null>(stats ?? null);
   const [dashboardRevenueData, setDashboardRevenueData] = useState<RevenueData[]>(revenueData ?? []);
   const [dashboardVehicles, setDashboardVehicles] = useState<OwnerVehicleSummary[]>([]);
+  const [notifications, setNotifications] = useState<OwnerNotificationSummary[]>([]);
+  const [publicSettings, setPublicSettings] = useState<Pick<PrivateAppSettings, 'publicStoreUrl' | 'storeSlug'> | null>(null);
   const [isLoading, setIsLoading] = useState(!stats || !revenueData);
   const [error, setError] = useState('');
 
   const isOwnerSpace = user?.role === 'PARC_AUTO' || user?.role === 'PARTICULIER';
 
-  const agencySlug = user?.name
-    ? user.name.toLowerCase().replace(/ /g, '-').replace(/[^\w-]+/g, '')
+  const fallbackAgencySlug = user?.name
+    ? user.name
+      .normalize('NFD')
+      .replace(/[\u0300-\u036f]/g, '')
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, '-')
+      .replace(/^-+|-+$/g, '')
     : 'ma-flotte';
 
-  const storeUrl = `${window.location.origin}/#/store/${agencySlug}`;
+  const storeUrl = publicSettings?.publicStoreUrl || `${window.location.origin}/#/store/${fallbackAgencySlug || 'ma-flotte'}`;
 
   const handleCopyLink = () => {
     navigator.clipboard.writeText(storeUrl);
@@ -136,13 +144,19 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
     const loadDashboard = async () => {
       try {
         setIsLoading(true);
-        const [overviewResponse, ownerResponse] = await Promise.all([
+        const [overviewResponse, ownerResponse, settingsResponse, notificationsResponse] = await Promise.all([
           stats && revenueData
             ? Promise.resolve({ stats, revenueData })
             : api.getDashboardOverview(),
           isOwnerSpace
             ? api.getOwnerDashboard().catch(() => null)
             : Promise.resolve(null),
+          isOwnerSpace
+            ? api.getPrivateSettings().catch(() => null)
+            : Promise.resolve(null),
+          user
+            ? api.getNotifications().catch(() => [])
+            : Promise.resolve([]),
         ]);
         if (!isMounted) {
           return;
@@ -150,6 +164,11 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
         setDashboardStats(overviewResponse.stats);
         setDashboardRevenueData(overviewResponse.revenueData);
         setDashboardVehicles(ownerResponse?.vehicles.slice(0, 4) || []);
+        setNotifications(notificationsResponse);
+        setPublicSettings(settingsResponse ? {
+          publicStoreUrl: settingsResponse.publicStoreUrl,
+          storeSlug: settingsResponse.storeSlug,
+        } : null);
         setError('');
       } catch {
         if (!isMounted) {
@@ -168,7 +187,7 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
     return () => {
       isMounted = false;
     };
-  }, [isOwnerSpace, revenueData, stats]);
+  }, [isOwnerSpace, revenueData, stats, user]);
 
   const formatVehicleAvailability = (vehicle: OwnerVehicleSummary) => {
     if (!vehicle.occupiedUntil) {
@@ -485,6 +504,27 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
         </div>
 
         <div className="space-y-6">
+          <div className="border border-slate-200 bg-white p-6 shadow-sm">
+            <div className="flex items-center justify-between gap-3">
+              <div>
+                <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Notifications</p>
+                <h2 className="mt-2 text-lg font-extrabold text-slate-950">Ce qui attend une action</h2>
+              </div>
+              <BellRing size={18} className="text-indigo-600" />
+            </div>
+            <div className="mt-4 space-y-3">
+              {notifications.length > 0 ? notifications.slice(0, 5).map((notification) => (
+                <article key={notification.id} className={`border px-4 py-3 ${notification.isRead ? 'border-slate-200 bg-slate-50' : 'border-indigo-200 bg-indigo-50/60'}`}>
+                  <p className="text-sm font-bold text-slate-900">{notification.title}</p>
+                  <p className="mt-1 text-sm text-slate-500">{notification.detail}</p>
+                  <p className="mt-2 text-[11px] font-semibold text-slate-400">{new Date(notification.createdAt).toLocaleString('fr-FR')}</p>
+                </article>
+              )) : (
+                <p className="text-sm text-slate-500">Aucune notification recente.</p>
+              )}
+            </div>
+          </div>
+
           <div className="border border-slate-200 bg-white p-6 shadow-sm">
             <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-slate-400">Resume financier</p>
             <div className="mt-4 space-y-4">

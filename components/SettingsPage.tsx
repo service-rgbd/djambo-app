@@ -68,6 +68,35 @@ const SettingSection: React.FC<{
   </section>
 );
 
+const SettingGroup: React.FC<{
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}> = ({ title, description, children }) => (
+  <div className="border border-slate-200 bg-slate-50 p-4">
+    <div className="mb-4">
+      <h3 className="text-sm font-extrabold uppercase tracking-[0.16em] text-slate-900">{title}</h3>
+      <p className="mt-1 text-sm text-slate-500">{description}</p>
+    </div>
+    {children}
+  </div>
+);
+
+const ToggleCard: React.FC<{
+  title: string;
+  description: string;
+  checked: boolean;
+  onChange: (checked: boolean) => void;
+}> = ({ title, description, checked, onChange }) => (
+  <label className="flex items-center justify-between border border-slate-200 bg-white px-4 py-4">
+    <span>
+      <span className="block text-sm font-bold text-slate-900">{title}</span>
+      <span className="mt-1 block text-sm text-slate-500">{description}</span>
+    </span>
+    <input type="checkbox" checked={checked} onChange={(e) => onChange(e.target.checked)} className="h-5 w-5 border-slate-300 text-slate-950" />
+  </label>
+);
+
 const UploadCard: React.FC<{
   title: string;
   description: string;
@@ -320,31 +349,40 @@ export const SettingsPage: React.FC = () => {
           title="Identite et contacts"
           description="Les informations qui structurent le header, les pages publiques et les signatures de contrat."
         >
-          <div className="grid gap-4 md:grid-cols-2">
-            <label className="space-y-2">
-              <span className="text-sm font-semibold text-slate-700">Nom commercial</span>
-              <input className="w-full border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.businessName} onChange={(e) => handleChange('businessName', e.target.value)} />
-            </label>
-            <label className="space-y-2">
-              <span className="text-sm font-semibold text-slate-700">Ville principale</span>
-              <input className="w-full border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.city} onChange={(e) => handleChange('city', e.target.value)} />
-            </label>
-            <label className="space-y-2">
-              <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700"><Mail size={14} /> Email public</span>
-              <input className="w-full border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.publicEmail} onChange={(e) => handleChange('publicEmail', e.target.value)} />
-            </label>
-            <label className="space-y-2">
-              <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700"><Phone size={14} /> Telephone support</span>
-              <input className="w-full border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.supportPhone} onChange={(e) => handleChange('supportPhone', e.target.value)} />
-            </label>
-            <label className="space-y-2 md:col-span-2">
-              <span className="text-sm font-semibold text-slate-700">Temps de reponse affiche</span>
-              <select className="w-full border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.responseTime} onChange={(e) => handleChange('responseTime', e.target.value)}>
-                <option>Reponse en moins de 30 min</option>
-                <option>Reponse en moins d 1h</option>
-                <option>Reponse dans la journee</option>
-              </select>
-            </label>
+          <div className="grid gap-4">
+            <SettingGroup title="Marque" description="Les informations qui definissent l identite affichée dans l app et la vitrine.">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-700">Nom commercial</span>
+                  <input className="w-full border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.businessName} onChange={(e) => handleChange('businessName', e.target.value)} />
+                </label>
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-700">Ville principale</span>
+                  <input className="w-full border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.city} onChange={(e) => handleChange('city', e.target.value)} />
+                </label>
+              </div>
+            </SettingGroup>
+
+            <SettingGroup title="Contact public" description="Les coordonnees visibles pour les clients et dans les documents.">
+              <div className="grid gap-4 md:grid-cols-2">
+                <label className="space-y-2">
+                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700"><Mail size={14} /> Email public</span>
+                  <input className="w-full border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.publicEmail} onChange={(e) => handleChange('publicEmail', e.target.value)} />
+                </label>
+                <label className="space-y-2">
+                  <span className="inline-flex items-center gap-2 text-sm font-semibold text-slate-700"><Phone size={14} /> Telephone support</span>
+                  <input className="w-full border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.supportPhone} onChange={(e) => handleChange('supportPhone', e.target.value)} />
+                </label>
+                <label className="space-y-2 md:col-span-2">
+                  <span className="text-sm font-semibold text-slate-700">Temps de reponse affiche</span>
+                  <select className="w-full border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.responseTime} onChange={(e) => handleChange('responseTime', e.target.value)}>
+                    <option>Reponse en moins de 30 min</option>
+                    <option>Reponse en moins d 1h</option>
+                    <option>Reponse dans la journee</option>
+                  </select>
+                </label>
+              </div>
+            </SettingGroup>
           </div>
         </SettingSection>
 
@@ -354,42 +392,48 @@ export const SettingsPage: React.FC = () => {
           description="Des liens partageables qui correspondent reellement a la vitrine et au profil public."
         >
           <div className="space-y-4">
-            <label className="space-y-2">
-              <span className="text-sm font-semibold text-slate-700">Slug public</span>
-              <input
-                className="w-full border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950"
-                value={settings.storeSlug}
-                onChange={(e) => {
-                  const slug = e.target.value.toLowerCase().replace(/\s+/g, '-');
-                  handleChange('storeSlug', slug);
-                  handleChange('publicStoreUrl', `${window.location.origin}/#/store/${slug}`);
-                  handleChange('publicProfileUrl', `${window.location.origin}/#/profile/${slug}`);
-                }}
-              />
-            </label>
+            <SettingGroup title="Adresse publique" description="Le slug pilote la boutique publique et le profil public.">
+              <label className="space-y-2">
+                <span className="text-sm font-semibold text-slate-700">Slug public</span>
+                <input
+                  className="w-full border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-950"
+                  value={settings.storeSlug}
+                  onChange={(e) => {
+                    const slug = e.target.value.toLowerCase().replace(/\s+/g, '-');
+                    handleChange('storeSlug', slug);
+                    handleChange('publicStoreUrl', `${window.location.origin}/#/store/${slug}`);
+                    handleChange('publicProfileUrl', `${window.location.origin}/#/profile/${slug}`);
+                  }}
+                />
+              </label>
+            </SettingGroup>
 
-            {publicLinks.map((item) => (
-              <div key={item.key} className="border border-slate-200 bg-slate-50 p-4">
-                <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
-                  <div>
-                    <p className="text-sm font-bold text-slate-900">{item.label}</p>
-                    <p className="mt-1 break-all text-sm text-slate-500">{item.value}</p>
+            <SettingGroup title="Partage" description="Copie rapide des liens frontend réellement générés.">
+              <div className="space-y-4">
+                {publicLinks.map((item) => (
+                  <div key={item.key} className="border border-slate-200 bg-white p-4">
+                    <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+                      <div>
+                        <p className="text-sm font-bold text-slate-900">{item.label}</p>
+                        <p className="mt-1 break-all text-sm text-slate-500">{item.value}</p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={async () => {
+                          await copyToClipboard(item.value);
+                          setCopiedKey(item.key);
+                          setTimeout(() => setCopiedKey(''), 1600);
+                        }}
+                        className="inline-flex items-center gap-2 border border-slate-200 bg-slate-50 px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
+                      >
+                        {copiedKey === item.key ? <Check size={16} /> : <Copy size={16} />}
+                        {copiedKey === item.key ? 'Copie' : 'Copier'}
+                      </button>
+                    </div>
                   </div>
-                  <button
-                    type="button"
-                    onClick={async () => {
-                      await copyToClipboard(item.value);
-                      setCopiedKey(item.key);
-                      setTimeout(() => setCopiedKey(''), 1600);
-                    }}
-                    className="inline-flex items-center gap-2 border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 hover:bg-slate-100"
-                  >
-                    {copiedKey === item.key ? <Check size={16} /> : <Copy size={16} />}
-                    {copiedKey === item.key ? 'Copie' : 'Copier'}
-                  </button>
-                </div>
+                ))}
               </div>
-            ))}
+            </SettingGroup>
           </div>
         </SettingSection>
       </div>
@@ -434,45 +478,22 @@ export const SettingsPage: React.FC = () => {
           description="Les options activables qui doivent se retrouver ensuite dans les fiches et les contrats."
         >
           <div className="space-y-4">
-            <div className="grid gap-4 md:grid-cols-2">
-              <label className="flex items-center justify-between border border-slate-200 bg-slate-50 px-4 py-4">
-                <span>
-                  <span className="block text-sm font-bold text-slate-900">Chauffeur a la demande</span>
-                  <span className="mt-1 block text-sm text-slate-500">Propose une option chauffeur dans les contrats.</span>
-                </span>
-                <input type="checkbox" checked={settings.chauffeurOnDemand} onChange={(e) => handleChange('chauffeurOnDemand', e.target.checked)} className="h-5 w-5 border-slate-300 text-slate-950" />
-              </label>
-
-              <label className="flex items-center justify-between border border-slate-200 bg-slate-50 px-4 py-4">
-                <span>
-                  <span className="block text-sm font-bold text-slate-900">Livraison active</span>
-                  <span className="mt-1 block text-sm text-slate-500">Autorise remise et restitution hors agence.</span>
-                </span>
-                <input type="checkbox" checked={settings.deliveryEnabled} onChange={(e) => handleChange('deliveryEnabled', e.target.checked)} className="h-5 w-5 border-slate-300 text-slate-950" />
-              </label>
-
-              <label className="flex items-center justify-between border border-slate-200 bg-slate-50 px-4 py-4">
-                <span>
-                  <span className="block text-sm font-bold text-slate-900">WhatsApp actif</span>
-                  <span className="mt-1 block text-sm text-slate-500">Ajoute un canal direct dans les pages publiques.</span>
-                </span>
-                <input type="checkbox" checked={settings.whatsappEnabled} onChange={(e) => handleChange('whatsappEnabled', e.target.checked)} className="h-5 w-5 border-slate-300 text-slate-950" />
-              </label>
-
-              <label className="flex items-center justify-between border border-slate-200 bg-slate-50 px-4 py-4">
-                <span>
-                  <span className="block text-sm font-bold text-slate-900">Signature contrat</span>
-                  <span className="mt-1 block text-sm text-slate-500">Conserve une etape de validation contractuelle explicite.</span>
-                </span>
-                <input type="checkbox" checked={settings.contractSignatureEnabled} onChange={(e) => handleChange('contractSignatureEnabled', e.target.checked)} className="h-5 w-5 border-slate-300 text-slate-950" />
-              </label>
-            </div>
+            <SettingGroup title="Services commerciaux" description="Les options visibles pour la reservation et la relation client.">
+              <div className="grid gap-4 md:grid-cols-2">
+                <ToggleCard title="Chauffeur a la demande" description="Propose une option chauffeur dans les contrats." checked={settings.chauffeurOnDemand} onChange={(checked) => handleChange('chauffeurOnDemand', checked)} />
+                <ToggleCard title="Livraison active" description="Autorise remise et restitution hors agence." checked={settings.deliveryEnabled} onChange={(checked) => handleChange('deliveryEnabled', checked)} />
+                <ToggleCard title="WhatsApp actif" description="Ajoute un canal direct dans les pages publiques." checked={settings.whatsappEnabled} onChange={(checked) => handleChange('whatsappEnabled', checked)} />
+                <ToggleCard title="Signature contrat" description="Conserve une etape de validation contractuelle explicite." checked={settings.contractSignatureEnabled} onChange={(checked) => handleChange('contractSignatureEnabled', checked)} />
+              </div>
+            </SettingGroup>
 
             {settings.chauffeurOnDemand && (
-              <label className="space-y-2">
-                <span className="text-sm font-semibold text-slate-700">Tarif journalier chauffeur</span>
-                <input className="w-full border border-slate-200 px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.chauffeurDailyRate} onChange={(e) => handleChange('chauffeurDailyRate', e.target.value)} />
-              </label>
+              <SettingGroup title="Tarification chauffeur" description="Le montant réutilisé dans les contrats quand le service est activé.">
+                <label className="space-y-2">
+                  <span className="text-sm font-semibold text-slate-700">Tarif journalier chauffeur</span>
+                  <input className="w-full border border-slate-200 bg-white px-4 py-3 text-sm outline-none focus:border-slate-950" value={settings.chauffeurDailyRate} onChange={(e) => handleChange('chauffeurDailyRate', e.target.value)} />
+                </label>
+              </SettingGroup>
             )}
           </div>
         </SettingSection>
@@ -566,24 +587,12 @@ export const SettingsPage: React.FC = () => {
         title="Notifications et supervision"
         description="Ce qui doit etre remonte au bon moment dans le header et le suivi utilisateur."
       >
-        <div className="grid gap-4 md:grid-cols-3">
-          <label className="flex items-center justify-between border border-slate-200 bg-slate-50 px-4 py-4">
-            <span>
-              <span className="block text-sm font-bold text-slate-900">Alertes email</span>
-              <span className="mt-1 block text-sm text-slate-500">Demandes, contrats et activite.</span>
-            </span>
-            <input type="checkbox" checked={settings.notificationsEmail} onChange={(e) => handleChange('notificationsEmail', e.target.checked)} className="h-5 w-5 border-slate-300 text-slate-950" />
-          </label>
-          <label className="flex items-center justify-between border border-slate-200 bg-slate-50 px-4 py-4">
-            <span>
-              <span className="block text-sm font-bold text-slate-900">Alertes SMS</span>
-              <span className="mt-1 block text-sm text-slate-500">Pour les validations urgentes.</span>
-            </span>
-            <input type="checkbox" checked={settings.notificationsSms} onChange={(e) => handleChange('notificationsSms', e.target.checked)} className="h-5 w-5 border-slate-300 text-slate-950" />
-          </label>
+        <div className="grid gap-4 xl:grid-cols-[1fr_1fr_0.9fr]">
+          <ToggleCard title="Alertes email" description="Demandes, contrats et activite." checked={settings.notificationsEmail} onChange={(checked) => handleChange('notificationsEmail', checked)} />
+          <ToggleCard title="Alertes SMS" description="Pour les validations urgentes." checked={settings.notificationsSms} onChange={(checked) => handleChange('notificationsSms', checked)} />
           <div className="border border-slate-200 bg-slate-50 px-4 py-4">
             <div className="inline-flex items-center gap-2 text-sm font-bold text-slate-900"><ShieldCheck size={16} /> Cohesion</div>
-            <p className="mt-2 text-sm text-slate-500">Les options activees ici servent de reference pour l interface privee et la vitrine.</p>
+            <p className="mt-2 text-sm text-slate-500">Les options activees ici servent de reference pour l interface privee, les contrats et la vitrine publique.</p>
           </div>
         </div>
       </SettingSection>

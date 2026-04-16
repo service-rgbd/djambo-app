@@ -40,6 +40,12 @@ services:
         sync: false
       - key: OPEN_AI_CHAT_BOT
         sync: false
+      - key: WEB_PUSH_PUBLIC_KEY
+        sync: false
+      - key: WEB_PUSH_PRIVATE_KEY
+        sync: false
+      - key: WEB_PUSH_SUBJECT
+        value: mailto:support@djambo-app.com
       - key: OPENROUTER_MODEL
         value: google/gemini-2.0-flash-001
       - key: AI_CACHE_TTL_MS

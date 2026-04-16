@@ -29,6 +29,8 @@ const CATEGORIES = [
   { label: 'Economique', value: VehicleCategory.ECONOMIQUE },
   { label: 'Pick-up', value: VehicleCategory.PICKUP },
   { label: 'Utilitaire', value: VehicleCategory.UTILITAIRE },
+  { label: 'Cabriolet', value: VehicleCategory.CABRIOLET },
+  { label: 'Monospace', value: VehicleCategory.MONOSPACE },
 ];
 const CONTRACT_ILLUSTRATION_SRC = new URL('../../ullustrqtionsectioncontrat.jpg', import.meta.url).href;
 const COCODY_RIVIERA_SCENE_SRC = new URL('../../VILLE, RESIDENCE, RENDEZ-VOUS Djambo Cocody Riviera .jpeg', import.meta.url).href;
@@ -220,16 +222,10 @@ export const LandingPage: React.FC = () => {
 
   const handleSearch = (event: React.FormEvent) => {
     event.preventDefault();
-    const params = new URLSearchParams();
-    if (city) params.set('city', city);
-    if (type) params.set('category', type);
-    navigate('/vehicles?' + params.toString());
+    navigate('/vehicles');
   };
 
-  const fleetHref = `/vehicles?${new URLSearchParams({
-    ...(city ? { city } : {}),
-    ...(type ? { category: type } : {}),
-  }).toString()}`;
+  const fleetHref = '/vehicles';
 
   return (
     <div className="min-h-screen bg-[#f7f5f0] text-slate-900 font-sans">
@@ -424,7 +420,7 @@ export const LandingPage: React.FC = () => {
             </div>
             <div className="flex flex-col items-start gap-3 sm:items-end">
               <div className="flex flex-wrap gap-2.5">
-                {CATEGORIES.slice(0, 5).map((category) => (
+                {CATEGORIES.map((category) => (
                   <span key={category.value} className="border border-slate-200 bg-slate-50 px-4 py-2 text-sm font-semibold text-slate-600">
                     {category.label}
                   </span>
@@ -663,9 +659,10 @@ export const LandingPage: React.FC = () => {
               <div>
                 <p className="mb-4 text-xs font-semibold uppercase tracking-[0.2em] text-slate-400">Informations</p>
                 <div className="space-y-3 text-sm text-slate-600">
+                  <Link to="/about" className="block transition-colors hover:text-slate-900">A propos de Djambo</Link>
                   <Link to="/terms" className="block transition-colors hover:text-slate-900">Conditions générales</Link>
                   <Link to="/privacy" className="block transition-colors hover:text-slate-900">Politique de confidentialité</Link>
-                  <Link to="/privacy" className="block transition-colors hover:text-slate-900">Informations légales</Link>
+                  <Link to="/legal" className="block transition-colors hover:text-slate-900">Mentions légales</Link>
                   <Link to="/cookies" className="block transition-colors hover:text-slate-900">Cookies et préférences</Link>
                 </div>
               </div>

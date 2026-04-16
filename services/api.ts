@@ -10,13 +10,20 @@ const defaultApiBaseUrl = 'https://api.djambo-app.com';
 const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined)
   || defaultApiBaseUrl;
 
+const normalizeEmail = (email: string) => email.trim().toLowerCase();
+
 type StoredUser = {
   id: string;
   name: string;
   email: string;
   role: UserRole;
   phone?: string;
+  authToken?: string;
+  sessionExpiresAt?: string;
 };
+
+const storedUserKey = 'fleet_user';
+const authExpiredEventName = 'djambo:auth-expired';
 
 export type CustomerSummary = {
   id: string;
@@ -104,6 +111,9 @@ export type OwnerRequestSummary = {
   identity_number: string | null;
   license_number: string | null;
   vehicle_title: string;
+  response_message?: string | null;
+  responded_at?: string | null;
+  responded_by_user_id?: string | null;
 };
 
 export type OwnerReviewSummary = {
@@ -117,11 +127,15 @@ export type OwnerReviewSummary = {
 
 export type OwnerNotificationSummary = {
   id: string;
-  type: 'booking' | 'request' | 'offer' | 'review';
+  type: 'REQUEST_CREATED' | 'REQUEST_UPDATED' | 'CONTRACT_CREATED' | 'CONTRACT_UPDATED' | 'PROFILE_VIEWED';
   title: string;
   detail: string;
-  status: string;
+  relatedKind: string;
+  relatedId: string | null;
+  metadata: Record<string, unknown>;
+  isRead: boolean;
   createdAt: string;
+  readAt?: string | null;
 };
 
 export type OwnerDashboardResponse = {
@@ -252,7 +266,20 @@ export type ManagedContractRecord = {
   customerEmail?: string;
   customerPhone?: string;
   vehicleLabel?: string;
+  responseMessage?: string | null;
+  respondedAt?: string | null;
+  respondedByUserId?: string | null;
   contractUrl: string;
+};
+
+export type UpdateVehicleRequestPayload = {
+  status: 'PENDING' | 'CONTACTED' | 'APPROVED' | 'REJECTED' | 'CANCELED';
+  responseMessage?: string;
+};
+
+export type UpdateContractPayload = {
+  status: 'PENDING_PAYMENT' | 'ACTIVE' | 'COMPLETED' | 'CANCELLED';
+  responseMessage?: string;
 };
 
 export type CreateContractPayload = {
@@ -334,6 +361,33 @@ export type VehicleRequestResponse = {
 export type UploadVehicleImageResponse = {
   key: string;
   url: string;
+};
+
+export type AIChatMessage = {
+  role: 'user' | 'assistant';
+  text: string;
+};
+
+export type AIChatResponse = {
+  reply: string;
+  source: 'fallback' | 'cache' | 'openrouter';
+  cached: boolean;
+  model?: string;
+};
+
+export type PushPublicKeyResponse = {
+  enabled: boolean;
+  publicKey: string | null;
+};
+
+export type PushSubscriptionPayload = {
+  endpoint: string;
+  expirationTime?: number | null;
+  keys: {
+    p256dh: string;
+    auth: string;
+  };
+  contentEncoding?: string;
 };
 
 export type PrivateSettingMediaScope = 'brand-logo' | 'storefront-cover' | 'contract-banner';
@@ -620,13 +674,42 @@ const buildLegacyStorefrontResponse = (slug: string): MarketplaceStorefrontRespo
 };
 
 const getStoredUser = (): StoredUser | null => {
-  const raw = localStorage.getItem('fleet_user');
-  return raw ? JSON.parse(raw) : null;
+  const raw = localStorage.getItem(storedUserKey);
+  if (!raw) {
+    return null;
+  }
+
+  try {
+    return JSON.parse(raw) as StoredUser;
+  } catch {
+    localStorage.removeItem(storedUserKey);
+    return null;
+  }
+};
+
+export const persistStoredUser = (user: StoredUser | null) => {
+  if (user) {
+    localStorage.setItem(storedUserKey, JSON.stringify(user));
+    return;
+  }
+
+  localStorage.removeItem(storedUserKey);
+};
+
+const notifyAuthExpired = () => {
+  persistStoredUser(null);
+  window.dispatchEvent(new CustomEvent(authExpiredEventName));
+};
+
+export const onAuthExpired = (callback: () => void) => {
+  const listener = () => callback();
+  window.addEventListener(authExpiredEventName, listener);
+  return () => window.removeEventListener(authExpiredEventName, listener);
 };
 
 const buildAuthHeaders = () => {
   const storedUser = getStoredUser();
-  return storedUser ? { 'x-user-id': storedUser.id, 'x-user-role': storedUser.role } : {};
+  return storedUser?.authToken ? { Authorization: `Bearer ${storedUser.authToken}` } : {};
 };
 
 const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
@@ -640,6 +723,10 @@ const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
   });
 
   if (!response.ok) {
+    if (response.status === 401) {
+      notifyAuthExpired();
+    }
+
     const message = await response.text();
     try {
       const parsed = JSON.parse(message) as { message?: string };
@@ -655,7 +742,10 @@ const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
 export const api = {
   login: (email: string, password: string) => apiRequest<StoredUser>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email, password }),
+    body: JSON.stringify({ email: normalizeEmail(email), password }),
+  }),
+  logout: () => apiRequest<{ ok: true }>('/api/auth/logout', {
+    method: 'POST',
   }),
   register: (payload: RegisterPayload) => apiRequest<RegisterResponse>('/api/auth/register', {
     method: 'POST',
@@ -671,6 +761,16 @@ export const api = {
   }),
   submitVehicleRequest: (payload: VehicleRequestPayload) => apiRequest<VehicleRequestResponse>('/api/vehicle-requests', {
     method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  updateVehicleRequest: (requestId: string, payload: UpdateVehicleRequestPayload) => apiRequest<{
+    id: string;
+    status: string;
+    responseMessage?: string | null;
+    respondedAt?: string | null;
+    respondedByUserId?: string | null;
+  }>(`/api/vehicle-requests/${requestId}`, {
+    method: 'PATCH',
     body: JSON.stringify(payload),
   }),
   getCustomers: () => apiRequest<CustomerSummary[]>('/api/customers'),
@@ -701,6 +801,10 @@ export const api = {
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        notifyAuthExpired();
+      }
+
       const message = await response.text();
       try {
         const parsed = JSON.parse(message) as { message?: string };
@@ -725,6 +829,10 @@ export const api = {
     });
 
     if (!response.ok) {
+      if (response.status === 401) {
+        notifyAuthExpired();
+      }
+
       const message = await response.text();
       try {
         const parsed = JSON.parse(message) as { message?: string };
@@ -743,6 +851,29 @@ export const api = {
   createContract: (payload: CreateContractPayload) => apiRequest<ManagedContractRecord>('/api/contracts', {
     method: 'POST',
     body: JSON.stringify(payload),
+  }),
+  updateContract: (contractId: string, payload: UpdateContractPayload) => apiRequest<{
+    id: string;
+    status: ManagedContractRecord['status'];
+    responseMessage?: string | null;
+    respondedAt?: string | null;
+    respondedByUserId?: string | null;
+  }>(`/api/contracts/${contractId}`, {
+    method: 'PATCH',
+    body: JSON.stringify(payload),
+  }),
+  getNotifications: () => apiRequest<OwnerNotificationSummary[]>('/api/notifications'),
+  markNotificationRead: (notificationId: string) => apiRequest<{ id: string; isRead: boolean; readAt?: string | null }>(`/api/notifications/${notificationId}/read`, {
+    method: 'PATCH',
+  }),
+  getPushPublicKey: () => apiRequest<PushPublicKeyResponse>('/api/push/public-key'),
+  savePushSubscription: (payload: PushSubscriptionPayload) => apiRequest<{ ok: true; id: string | null; endpoint: string }>('/api/push/subscriptions', {
+    method: 'POST',
+    body: JSON.stringify(payload),
+  }),
+  deletePushSubscription: (endpoint: string) => apiRequest<{ ok: true; removed: boolean }>('/api/push/subscriptions', {
+    method: 'DELETE',
+    body: JSON.stringify({ endpoint }),
   }),
   getDashboardOverview: () => apiRequest<{
     stats: FleetStats & { availableVehicles: number; totalParkings: number };
@@ -803,5 +934,9 @@ export const api = {
   updateParkingLocation: (parkingId: string, payload: ParkingLocationPayload) => apiRequest<OwnerParkingSummary>(`/api/owner/parkings/${parkingId}/location`, {
     method: 'PUT',
     body: JSON.stringify(payload),
+  }),
+  chatWithAssistant: (messages: AIChatMessage[]) => apiRequest<AIChatResponse>('/api/ai/chat', {
+    method: 'POST',
+    body: JSON.stringify({ messages }),
   }),
 };

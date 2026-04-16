@@ -1,8 +1,10 @@
 import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import path from 'node:path';
 import express from 'express';
 import cors from 'cors';
 import postgres from 'postgres';
+import webpush from 'web-push';
 import { GetObjectCommand, PutObjectCommand, S3Client } from '@aws-sdk/client-s3';
 import { loadEnvConfig } from '../utils/loadEnv.mjs';
 
@@ -20,7 +22,12 @@ const hashPassword = (password) => crypto.scryptSync(password, 'fleetcommand-sal
 const hashVerificationToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 const resendApiKey = env.RESEND_API_KEY;
 const resendFromEmail = env.RESEND_FROM_EMAIL || 'Djambo <onboarding@resend.dev>';
+const sessionTtlMs = Math.max(86_400_000, Number(env.SESSION_TTL_MS || 2_592_000_000) || 2_592_000_000);
 const openRouterApiKey = env.OPEN_AI_CHAT_BOT || env.OPENROUTER_API_KEY || '';
+const webPushPublicKey = env.WEB_PUSH_PUBLIC_KEY || '';
+const webPushPrivateKey = env.WEB_PUSH_PRIVATE_KEY || '';
+const webPushSubject = env.WEB_PUSH_SUBJECT || 'mailto:support@djambo-app.com';
+const webPushConfigured = Boolean(webPushPublicKey && webPushPrivateKey);
 const openRouterModel = env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001';
 const aiCacheTtlMs = Math.max(60_000, Number(env.AI_CACHE_TTL_MS || 21_600_000) || 21_600_000);
 const aiResponseCache = new Map();
@@ -38,7 +45,7 @@ const allowedOrigins = (env.ALLOWED_ORIGINS || `${normalizedAppUrl},http://local
   .map((origin) => origin.trim())
   .filter(Boolean);
 const localOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
-const mediaDirectory = workspaceRoot;
+const mediaDirectory = path.join(workspaceRoot, 'uploads');
 const defaultVehicleReleaseTime = '10:00';
 const uploadStorageProvider = env.UPLOAD_STORAGE_PROVIDER || 'local';
 const maxUploadSizeMb = Math.max(1, Number(env.MAX_UPLOAD_SIZE_MB || 10) || 10);
@@ -57,17 +64,112 @@ const r2Client = uploadStorageProvider === 'r2' && env.R2_ACCOUNT_ID && env.R2_B
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-const getRequestUserId = (req) => {
-  const userId = req.headers['x-user-id'];
-  if (!userId || Array.isArray(userId)) {
+if (webPushConfigured) {
+  webpush.setVapidDetails(webPushSubject, webPushPublicKey, webPushPrivateKey);
+}
+
+const getRequestUserId = (req) => req.authUser?.id || null;
+
+const getRequestUserRole = (req) => req.authUser?.role || null;
+
+const hashSessionToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
+
+const getSessionTokenFromRequest = (req) => {
+  const authorizationHeader = req.headers.authorization;
+  if (typeof authorizationHeader === 'string') {
+    const [scheme, token] = authorizationHeader.split(/\s+/, 2);
+    if (/^bearer$/i.test(scheme) && token) {
+      return token.trim();
+    }
+  }
+
+  const fallbackHeader = req.headers['x-auth-token'];
+  if (typeof fallbackHeader === 'string' && fallbackHeader.trim()) {
+    return fallbackHeader.trim();
+  }
+
+  return '';
+};
+
+const createSessionForUser = async ({ user, req }) => {
+  const sessionToken = crypto.randomBytes(48).toString('hex');
+  const expiresAt = new Date(Date.now() + sessionTtlMs);
+
+  await sql`
+    insert into app_sessions (
+      user_id,
+      token_hash,
+      expires_at,
+      ip_address,
+      user_agent
+    ) values (
+      ${user.id}::uuid,
+      ${hashSessionToken(sessionToken)},
+      ${expiresAt.toISOString()},
+      ${req.ip || null},
+      ${sanitizeText(req.headers['user-agent']) || null}
+    );
+  `;
+
+  return {
+    authToken: sessionToken,
+    sessionExpiresAt: expiresAt.toISOString(),
+  };
+};
+
+const resolveAuthenticatedUser = async (req) => {
+  const sessionToken = getSessionTokenFromRequest(req);
+  if (!sessionToken) {
     return null;
   }
 
-  if (!uuidPattern.test(userId)) {
+  const tokenHash = hashSessionToken(sessionToken);
+  const sessions = await sql`
+    select
+      s.id as session_id,
+      s.user_id,
+      s.expires_at,
+      u.full_name,
+      u.email,
+      u.role,
+      coalesce(u.phone, '') as phone
+    from app_sessions s
+    join app_users u on u.id = s.user_id
+    where s.token_hash = ${tokenHash}
+      and s.revoked_at is null
+      and s.expires_at > now()
+    limit 1;
+  `;
+
+  const session = sessions[0];
+  if (!session) {
     return null;
   }
 
-  return userId;
+  await sql`
+    update app_sessions
+    set last_seen_at = now()
+    where id = ${session.session_id}::uuid;
+  `;
+
+  return {
+    sessionId: session.session_id,
+    id: session.user_id,
+    name: session.full_name,
+    email: session.email,
+    role: session.role,
+    phone: session.phone || undefined,
+    sessionExpiresAt: session.expires_at,
+  };
+};
+
+const requireAuthenticatedUser = (req, res) => {
+  if (!req.authUser) {
+    res.status(401).json({ message: 'Authentification requise.' });
+    return null;
+  }
+
+  return req.authUser;
 };
 
 const normalizeVehicleRequestType = (value) => {
@@ -350,13 +452,20 @@ const normalizeStoredMediaUrl = (value) => {
 };
 
 const uploadBufferToR2 = async ({ folder, actorId, defaultName, buffer, contentType, fileName }) => {
-  if (!r2Client || !env.R2_BUCKET_NAME) {
-    throw new Error('Le stockage R2 n est pas configure sur le backend.');
-  }
-
   const extension = allowedUploadContentTypes.get(contentType) || 'bin';
   const safeName = slugifyFilePart(path.basename(fileName || `upload.${extension}`, path.extname(fileName || '')) || defaultName || 'media');
   const objectKey = `${folder}/${actorId}/${Date.now()}-${crypto.randomBytes(6).toString('hex')}-${safeName || defaultName || 'image'}.${extension}`;
+
+  if (!r2Client || !env.R2_BUCKET_NAME) {
+    const localFilePath = path.join(mediaDirectory, objectKey);
+    await fs.mkdir(path.dirname(localFilePath), { recursive: true });
+    await fs.writeFile(localFilePath, buffer);
+
+    return {
+      key: objectKey,
+      url: buildPublicMediaUrl(objectKey),
+    };
+  }
 
   await r2Client.send(new PutObjectCommand({
     Bucket: env.R2_BUCKET_NAME,
@@ -395,6 +504,272 @@ const sanitizeCustomerDetails = (details, user) => {
 const buildUserInitials = (fullName) => {
   const parts = sanitizeText(fullName).split(/\s+/).filter(Boolean);
   return (parts.slice(0, 2).map((part) => part.charAt(0).toUpperCase()).join('') || 'DJ').slice(0, 2);
+};
+
+const notificationTypeLabels = {
+  REQUEST_CREATED: 'Nouvelle demande',
+  REQUEST_UPDATED: 'Mise a jour de demande',
+  CONTRACT_CREATED: 'Nouveau contrat',
+  CONTRACT_UPDATED: 'Mise a jour de contrat',
+  PROFILE_VIEWED: 'Visite de profil',
+};
+
+const buildNotificationUrl = (targetPath) => {
+  const normalizedPath = sanitizeText(targetPath);
+  if (!normalizedPath) {
+    return `${normalizedAppUrl}/#/app/dashboard`;
+  }
+
+  if (/^https?:\/\//i.test(normalizedPath)) {
+    return normalizedPath;
+  }
+
+  return `${normalizedAppUrl}${normalizedPath.startsWith('/') ? normalizedPath : `/${normalizedPath}`}`;
+};
+
+const normalizePushSubscriptionPayload = (payload) => {
+  const endpoint = sanitizeText(payload?.endpoint);
+  const p256dh = sanitizeText(payload?.keys?.p256dh);
+  const auth = sanitizeText(payload?.keys?.auth);
+  const contentEncoding = sanitizeText(payload?.contentEncoding || payload?.content_encoding);
+
+  if (!endpoint || !/^https:\/\//i.test(endpoint) || !p256dh || !auth) {
+    return null;
+  }
+
+  return {
+    endpoint,
+    expirationTime: payload?.expirationTime ?? null,
+    keys: { p256dh, auth },
+    contentEncoding: contentEncoding || 'aesgcm',
+  };
+};
+
+const getActivePushSubscriptionsByUserId = async (userId) => {
+  if (!userId) {
+    return [];
+  }
+
+  return sql`
+    select id, endpoint, p256dh, auth, content_encoding
+    from app_push_subscriptions
+    where user_id = ${userId}::uuid
+      and disabled_at is null;
+  `;
+};
+
+const upsertPushSubscription = async ({ userId, subscription, userAgent }) => {
+  if (!userId || !subscription) {
+    return null;
+  }
+
+  const rows = await sql`
+    insert into app_push_subscriptions (
+      user_id,
+      endpoint,
+      p256dh,
+      auth,
+      content_encoding,
+      user_agent,
+      updated_at,
+      disabled_at,
+      failure_count,
+      last_failure_at
+    ) values (
+      ${userId}::uuid,
+      ${subscription.endpoint},
+      ${subscription.keys.p256dh},
+      ${subscription.keys.auth},
+      ${subscription.contentEncoding || 'aesgcm'},
+      ${userAgent || null},
+      now(),
+      null,
+      0,
+      null
+    )
+    on conflict (endpoint) do update set
+      user_id = excluded.user_id,
+      p256dh = excluded.p256dh,
+      auth = excluded.auth,
+      content_encoding = excluded.content_encoding,
+      user_agent = excluded.user_agent,
+      updated_at = now(),
+      disabled_at = null,
+      failure_count = 0,
+      last_failure_at = null
+    returning id, endpoint;
+  `;
+
+  return rows[0] || null;
+};
+
+const deletePushSubscriptionByEndpoint = async ({ userId, endpoint }) => {
+  if (!userId || !endpoint) {
+    return false;
+  }
+
+  const rows = await sql`
+    delete from app_push_subscriptions
+    where user_id = ${userId}::uuid
+      and endpoint = ${endpoint}
+    returning id;
+  `;
+
+  return rows.length > 0;
+};
+
+const sendPushNotificationToUser = async ({ recipientUserId, title, detail, notificationId = null, targetPath = '/#/app/dashboard', tag = 'djambo-notification', metadata = {} }) => {
+  if (!webPushConfigured || !recipientUserId || !title || !detail) {
+    return;
+  }
+
+  const subscriptions = await getActivePushSubscriptionsByUserId(recipientUserId);
+  if (!subscriptions.length) {
+    return;
+  }
+
+  const payload = JSON.stringify({
+    title,
+    body: detail,
+    icon: '/icon-192.png',
+    badge: '/favicon-96x96.png',
+    tag,
+    url: buildNotificationUrl(targetPath),
+    data: {
+      notificationId,
+      targetPath,
+      ...metadata,
+    },
+  });
+
+  await Promise.all(subscriptions.map(async (subscription) => {
+    try {
+      await webpush.sendNotification({
+        endpoint: subscription.endpoint,
+        keys: {
+          p256dh: subscription.p256dh,
+          auth: subscription.auth,
+        },
+      }, payload, {
+        TTL: 60,
+        urgency: 'high',
+      });
+
+      await sql`
+        update app_push_subscriptions
+        set last_success_at = now(),
+            failure_count = 0,
+            last_failure_at = null,
+            disabled_at = null,
+            updated_at = now()
+        where id = ${subscription.id}::uuid;
+      `;
+    } catch (error) {
+      const statusCode = Number(error?.statusCode || 0);
+      if (statusCode === 404 || statusCode === 410) {
+        await sql`
+          delete from app_push_subscriptions
+          where id = ${subscription.id}::uuid;
+        `;
+        return;
+      }
+
+      await sql`
+        update app_push_subscriptions
+        set last_failure_at = now(),
+            failure_count = failure_count + 1,
+            disabled_at = case when failure_count + 1 >= 5 then now() else disabled_at end,
+            updated_at = now()
+        where id = ${subscription.id}::uuid;
+      `;
+    }
+  }));
+};
+
+const createNotification = async ({ recipientUserId, actorUserId = null, type, title, detail, relatedKind, relatedId = null, metadata = {}, targetPath = '/#/app/dashboard' }) => {
+  if (!recipientUserId || !type || !title || !detail || !relatedKind) {
+    return null;
+  }
+
+  const rows = await sql`
+    insert into app_notifications (
+      recipient_user_id,
+      actor_user_id,
+      type,
+      title,
+      detail,
+      related_kind,
+      related_id,
+      metadata
+    ) values (
+      ${recipientUserId}::uuid,
+      ${actorUserId ? `${actorUserId}` : null}::uuid,
+      ${type},
+      ${title},
+      ${detail},
+      ${relatedKind},
+      ${relatedId ? `${relatedId}` : null}::uuid,
+      ${JSON.stringify(metadata)}::jsonb
+    )
+    returning id, created_at;
+  `;
+
+  const insertedNotification = rows[0] || null;
+  if (insertedNotification) {
+    try {
+      await sendPushNotificationToUser({
+        recipientUserId,
+        title,
+        detail,
+        notificationId: insertedNotification.id,
+        targetPath,
+        tag: `${type}-${relatedId || insertedNotification.id}`,
+        metadata,
+      });
+    } catch (pushError) {
+      console.error('Push notification dispatch failed', pushError);
+    }
+  }
+
+  return insertedNotification;
+};
+
+const getNotificationFeedByUserId = async (userId, limit = 25) => {
+  const rows = await sql`
+    select id, type, title, detail, related_kind, related_id, metadata, is_read, created_at, read_at
+    from app_notifications
+    where recipient_user_id = ${userId}::uuid
+    order by created_at desc
+    limit ${Math.max(1, Math.min(limit, 100))};
+  `;
+
+  return rows.map((notification) => ({
+    id: notification.id,
+    type: notification.type,
+    title: notification.title,
+    detail: notification.detail,
+    relatedKind: notification.related_kind,
+    relatedId: notification.related_id,
+    metadata: notification.metadata || {},
+    isRead: notification.is_read,
+    createdAt: notification.created_at,
+    readAt: notification.read_at,
+  }));
+};
+
+const recordOwnerProfileView = async ({ ownerProfileId, viewerUserId }) => {
+  if (!ownerProfileId || !viewerUserId) {
+    return { inserted: false };
+  }
+
+  const rows = await sql`
+    insert into owner_profile_views (owner_profile_id, viewer_user_id)
+    values (${ownerProfileId}::uuid, ${viewerUserId}::uuid)
+    on conflict (owner_profile_id, viewer_user_id) do nothing
+    returning owner_profile_id;
+  `;
+
+  return { inserted: rows.length > 0 };
 };
 
 const isMissingColumnError = (error, columnName) => (
@@ -1125,6 +1500,14 @@ app.use(cors({
   credentials: true,
 }));
 app.use(express.json({ limit: '12mb' }));
+app.use(async (req, _res, next) => {
+  try {
+    req.authUser = await resolveAuthenticatedUser(req);
+    next();
+  } catch (error) {
+    next(error);
+  }
+});
 const rawImageUpload = express.raw({
   type: (req) => String(req.headers['content-type'] || '').startsWith('image/'),
   limit: `${maxUploadSizeMb}mb`,
@@ -1367,6 +1750,30 @@ app.get('/api/marketplace/owners/:ownerId', async (req, res) => {
     }
 
     const ownerProfile = mapPublicOwnerProfile(rows[0]);
+    if (req.authUser?.id && req.authUser.id !== ownerProfile.userId) {
+      const profileView = await recordOwnerProfileView({
+        ownerProfileId: ownerProfile.id,
+        viewerUserId: req.authUser.id,
+      });
+
+      if (profileView.inserted) {
+        await createNotification({
+          recipientUserId: ownerProfile.userId,
+          actorUserId: req.authUser.id,
+          type: 'PROFILE_VIEWED',
+          title: notificationTypeLabels.PROFILE_VIEWED,
+          detail: `${req.authUser.name} a consulte votre profil public pour la premiere fois.`,
+          relatedKind: 'owner_profile',
+          relatedId: ownerProfile.id,
+          metadata: {
+            viewerName: req.authUser.name,
+            viewerRole: req.authUser.role,
+          },
+          targetPath: '/#/app/owner-dashboard',
+        });
+      }
+    }
+
     const [vehicles, reviews] = await Promise.all([
       (async () => {
         let vehicleRows;
@@ -1747,13 +2154,32 @@ app.post('/api/uploads/media', rawImageUpload, async (req, res) => {
 
 app.get(/^\/api\/media\/(.+)$/, async (req, res) => {
   try {
-    if (!r2Client || !env.R2_BUCKET_NAME) {
-      return res.status(503).json({ message: 'Le stockage media n est pas configure sur le backend.' });
-    }
-
     const objectKey = decodeURIComponent(String(req.params[0] || '')).replace(/^\/+/, '');
     if (!objectKey) {
       return res.status(400).json({ message: 'Chemin media invalide.' });
+    }
+
+    if (!r2Client || !env.R2_BUCKET_NAME) {
+      const localFilePath = path.resolve(mediaDirectory, objectKey);
+      const normalizedMediaRoot = path.resolve(mediaDirectory);
+      if (!localFilePath.startsWith(`${normalizedMediaRoot}${path.sep}`) && localFilePath !== normalizedMediaRoot) {
+        return res.status(400).json({ message: 'Chemin media invalide.' });
+      }
+
+      const mediaBuffer = await fs.readFile(localFilePath);
+      const extension = path.extname(localFilePath).toLowerCase();
+      const contentType = extension === '.jpg' || extension === '.jpeg'
+        ? 'image/jpeg'
+        : extension === '.png'
+          ? 'image/png'
+          : extension === '.webp'
+            ? 'image/webp'
+            : extension === '.avif'
+              ? 'image/avif'
+              : 'application/octet-stream';
+      res.setHeader('Content-Type', contentType);
+      res.setHeader('Cache-Control', 'public, max-age=31536000, immutable');
+      return res.status(200).send(mediaBuffer);
     }
 
     const mediaResult = await r2Client.send(new GetObjectCommand({
@@ -1972,10 +2398,42 @@ app.post('/api/auth/login', async (req, res) => {
       return res.status(403).json({ message: 'Veuillez confirmer votre adresse email avant de vous connecter.' });
     }
 
-    res.json({ id: user.id, name: user.full_name, email: user.email, role: user.role, phone: user.phone || undefined });
+    const session = await createSessionForUser({
+      user: { id: user.id },
+      req,
+    });
+
+    res.json({
+      id: user.id,
+      name: user.full_name,
+      email: user.email,
+      role: user.role,
+      phone: user.phone || undefined,
+      authToken: session.authToken,
+      sessionExpiresAt: session.sessionExpiresAt,
+    });
   } catch (error) {
     console.error(error);
     res.status(500).json({ message: 'Login failed' });
+  }
+});
+
+app.post('/api/auth/logout', async (req, res) => {
+  try {
+    const sessionToken = getSessionTokenFromRequest(req);
+    if (sessionToken) {
+      await sql`
+        update app_sessions
+        set revoked_at = now()
+        where token_hash = ${hashSessionToken(sessionToken)}
+          and revoked_at is null;
+      `;
+    }
+
+    return res.json({ ok: true });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Logout failed' });
   }
 });
 
@@ -2061,6 +2519,13 @@ app.post('/api/auth/reset-password', async (req, res) => {
       `;
 
       await transaction`
+        update app_sessions
+        set revoked_at = now()
+        where user_id = ${resetRecord.user_id}
+          and revoked_at is null;
+      `;
+
+      await transaction`
         update password_reset_tokens
         set consumed_at = now()
         where id = ${resetRecord.id};
@@ -2082,7 +2547,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
 
 app.post('/api/vehicle-requests', async (req, res) => {
   try {
-    const userId = getRequestUserId(req);
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
+    }
+
+    const userId = authUser.id;
     if (!userId) {
       return res.status(401).json({ message: 'Connexion requise pour envoyer une demande.' });
     }
@@ -2133,14 +2603,14 @@ app.post('/api/vehicle-requests', async (req, res) => {
 
     const matchedVehicleRows = uuidPattern.test(vehicleReference)
       ? await sql`
-          select v.id, v.title, v.owner_id, v.is_for_rent, v.is_for_sale, v.is_available, v.price_per_day, op.display_name
+          select v.id, v.title, v.owner_id, v.is_for_rent, v.is_for_sale, v.is_available, v.price_per_day, op.display_name, op.user_id as owner_user_id
           from vehicles v
           left join owner_profiles op on op.id = v.owner_id
           where v.id = ${vehicleReference}::uuid
           limit 1;
         `
       : await sql`
-          select v.id, v.title, v.owner_id, v.is_for_rent, v.is_for_sale, v.is_available, v.price_per_day, op.display_name
+          select v.id, v.title, v.owner_id, v.is_for_rent, v.is_for_sale, v.is_available, v.price_per_day, op.display_name, op.user_id as owner_user_id
           from vehicles v
           left join owner_profiles op on op.id = v.owner_id
           where lower(v.title) = lower(${vehicleTitle})
@@ -2232,6 +2702,25 @@ app.post('/api/vehicle-requests', async (req, res) => {
       returning id, request_type, status;
     `;
 
+    if (matchedVehicle?.owner_user_id && matchedVehicle.owner_user_id !== userId) {
+      await createNotification({
+        recipientUserId: matchedVehicle.owner_user_id,
+        actorUserId: userId,
+        type: 'REQUEST_CREATED',
+        title: notificationTypeLabels.REQUEST_CREATED,
+        detail: `${requestUser.full_name} a envoye une demande ${requestType === 'BUY' ? 'd achat' : 'de location'} pour ${matchedVehicle.title}.`,
+        relatedKind: 'vehicle_request',
+        relatedId: insertedRows[0].id,
+        metadata: {
+          requestType,
+          bookingChannel,
+          vehicleTitle: matchedVehicle.title,
+          customerName: requestUser.full_name,
+        },
+        targetPath: '/#/app/owner-dashboard',
+      });
+    }
+
     return res.status(201).json({
       id: insertedRows[0].id,
       requestType: insertedRows[0].request_type,
@@ -2245,6 +2734,92 @@ app.post('/api/vehicle-requests', async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Impossible d enregistrer votre demande pour le moment.' });
+  }
+});
+
+app.patch('/api/vehicle-requests/:requestId', async (req, res) => {
+  try {
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
+    }
+
+    const { requestId } = req.params;
+    if (!uuidPattern.test(requestId)) {
+      return res.status(400).json({ message: 'Demande invalide.' });
+    }
+
+    const nextStatus = typeof req.body.status === 'string' ? req.body.status.trim().toUpperCase() : '';
+    const responseMessage = sanitizeText(req.body.responseMessage) || null;
+    const allowedStatuses = ['PENDING', 'CONTACTED', 'APPROVED', 'REJECTED', 'CANCELED'];
+    if (!allowedStatuses.includes(nextStatus)) {
+      return res.status(400).json({ message: 'Statut de demande invalide.' });
+    }
+
+    const rows = await sql`
+      select vr.id, vr.user_id, vr.owner_id, vr.status, vr.vehicle_title, vr.request_type, op.user_id as owner_user_id
+      from vehicle_requests vr
+      left join owner_profiles op on op.id = vr.owner_id
+      where vr.id = ${requestId}::uuid
+      limit 1;
+    `;
+
+    const requestRow = rows[0];
+    if (!requestRow) {
+      return res.status(404).json({ message: 'Demande introuvable.' });
+    }
+
+    const isOwner = requestRow.owner_user_id === authUser.id;
+    const isCustomer = requestRow.user_id === authUser.id;
+    if (!isOwner && !isCustomer) {
+      return res.status(403).json({ message: 'Acces refuse.' });
+    }
+
+    if (isCustomer && nextStatus !== 'CANCELED') {
+      return res.status(403).json({ message: 'Le client peut uniquement annuler sa demande.' });
+    }
+
+    const updatedRows = await sql`
+      update vehicle_requests
+      set status = ${nextStatus},
+          response_message = ${responseMessage},
+          responded_at = now(),
+          responded_by_user_id = ${authUser.id}::uuid
+      where id = ${requestId}::uuid
+      returning id, status, response_message, responded_at, responded_by_user_id;
+    `;
+
+    const recipientUserId = isOwner ? requestRow.user_id : requestRow.owner_user_id;
+    if (recipientUserId) {
+      await createNotification({
+        recipientUserId,
+        actorUserId: authUser.id,
+        type: 'REQUEST_UPDATED',
+        title: notificationTypeLabels.REQUEST_UPDATED,
+        detail: isOwner
+          ? `${authUser.name} a repondu a votre demande pour ${requestRow.vehicle_title}.`
+          : `${authUser.name} a mis a jour sa demande pour ${requestRow.vehicle_title}.`,
+        relatedKind: 'vehicle_request',
+        relatedId: requestRow.id,
+        metadata: {
+          status: updatedRows[0].status,
+          responseMessage,
+          requestType: requestRow.request_type,
+        },
+        targetPath: isOwner ? '/#/app/dashboard' : '/#/app/owner-dashboard',
+      });
+    }
+
+    return res.json({
+      id: updatedRows[0].id,
+      status: updatedRows[0].status,
+      responseMessage: updatedRows[0].response_message,
+      respondedAt: updatedRows[0].responded_at,
+      respondedByUserId: updatedRows[0].responded_by_user_id,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Mise a jour de la demande impossible.' });
   }
 });
 
@@ -2758,10 +3333,12 @@ app.delete('/api/owner/vehicles/:vehicleId', async (req, res) => {
 
 app.get('/api/contracts', async (req, res) => {
   try {
-    const userId = getRequestUserId(req);
-    if (!userId) {
-      return res.status(401).json({ message: 'Missing user id' });
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
     }
+
+    const userId = authUser.id;
 
     const ownerProfile = await getOwnerProfileByUserId(userId);
     const rows = ownerProfile
@@ -2779,6 +3356,9 @@ app.get('/api/contracts', async (req, res) => {
             c.payment_method,
             c.chauffeur_requested,
             c.chauffeur_rate,
+            c.response_message,
+            c.responded_at,
+            c.responded_by_user_id,
             c.generated_at,
             u.full_name as customer_name,
             u.email as customer_email,
@@ -2804,6 +3384,9 @@ app.get('/api/contracts', async (req, res) => {
             c.payment_method,
             c.chauffeur_requested,
             c.chauffeur_rate,
+            c.response_message,
+            c.responded_at,
+            c.responded_by_user_id,
             c.generated_at,
             u.full_name as customer_name,
             u.email as customer_email,
@@ -2829,6 +3412,9 @@ app.get('/api/contracts', async (req, res) => {
       paymentMethod: contract.payment_method || 'Carte Bancaire',
       chauffeurRequested: contract.chauffeur_requested,
       chauffeurRate: contract.chauffeur_rate,
+      responseMessage: contract.response_message,
+      respondedAt: contract.responded_at,
+      respondedByUserId: contract.responded_by_user_id,
       generatedAt: contract.generated_at,
       customerName: contract.customer_name,
       customerEmail: contract.customer_email,
@@ -2844,10 +3430,12 @@ app.get('/api/contracts', async (req, res) => {
 
 app.post('/api/contracts', async (req, res) => {
   try {
-    const userId = getRequestUserId(req);
-    if (!userId) {
-      return res.status(401).json({ message: 'Missing user id' });
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
     }
+
+    const userId = authUser.id;
 
     const ownerProfile = await getOwnerProfileByUserId(userId);
     if (!ownerProfile) {
@@ -2905,6 +3493,21 @@ app.post('/api/contracts', async (req, res) => {
       ) returning *;
     `;
 
+    await createNotification({
+      recipientUserId: customer.id,
+      actorUserId: authUser.id,
+      type: 'CONTRACT_CREATED',
+      title: notificationTypeLabels.CONTRACT_CREATED,
+      detail: `${authUser.name} a genere un contrat pour ${vehicle.brand} ${vehicle.model}.`,
+      relatedKind: 'contract',
+      relatedId: insertedContract.id,
+      metadata: {
+        contractNumber,
+        vehicleLabel: `${vehicle.brand} ${vehicle.model}`,
+      },
+      targetPath: `/#/app/contracts?contract=${insertedContract.id}`,
+    });
+
     return res.status(201).json({
       id: insertedContract.id,
       contractNumber,
@@ -2918,6 +3521,9 @@ app.post('/api/contracts', async (req, res) => {
       paymentMethod: insertedContract.payment_method || 'Carte Bancaire',
       chauffeurRequested: insertedContract.chauffeur_requested,
       chauffeurRate: insertedContract.chauffeur_rate,
+      responseMessage: insertedContract.response_message,
+      respondedAt: insertedContract.responded_at,
+      respondedByUserId: insertedContract.responded_by_user_id,
       generatedAt: insertedContract.generated_at,
       customerName: customer.full_name,
       customerEmail: customer.email,
@@ -2928,6 +3534,200 @@ app.post('/api/contracts', async (req, res) => {
   } catch (error) {
     console.error(error);
     return res.status(500).json({ message: 'Contract creation failed' });
+  }
+});
+
+app.patch('/api/contracts/:contractId', async (req, res) => {
+  try {
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
+    }
+
+    const { contractId } = req.params;
+    if (!uuidPattern.test(contractId)) {
+      return res.status(400).json({ message: 'Contrat invalide.' });
+    }
+
+    const nextStatus = typeof req.body.status === 'string' ? req.body.status.trim().toUpperCase() : '';
+    const responseMessage = sanitizeText(req.body.responseMessage) || null;
+    const allowedStatuses = ['PENDING_PAYMENT', 'ACTIVE', 'COMPLETED', 'CANCELLED'];
+    if (!allowedStatuses.includes(nextStatus)) {
+      return res.status(400).json({ message: 'Statut de contrat invalide.' });
+    }
+
+    const rows = await sql`
+      select c.id, c.customer_id, c.contract_number, c.status, c.vehicle_id, c.owner_id, op.user_id as owner_user_id,
+             concat(v.brand, ' ', v.model) as vehicle_label
+      from contracts c
+      join vehicles v on v.id = c.vehicle_id
+      join owner_profiles op on op.id = c.owner_id
+      where c.id = ${contractId}::uuid
+      limit 1;
+    `;
+
+    const contract = rows[0];
+    if (!contract) {
+      return res.status(404).json({ message: 'Contrat introuvable.' });
+    }
+
+    const isOwner = contract.owner_user_id === authUser.id;
+    const isCustomer = contract.customer_id === authUser.id;
+    if (!isOwner && !isCustomer) {
+      return res.status(403).json({ message: 'Acces refuse.' });
+    }
+
+    const updatedRows = await sql`
+      update contracts
+      set status = ${nextStatus}::contract_status,
+          response_message = ${responseMessage},
+          responded_at = now(),
+          responded_by_user_id = ${authUser.id}::uuid
+      where id = ${contractId}::uuid
+      returning id, status, response_message, responded_at, responded_by_user_id;
+    `;
+
+    const recipientUserId = isOwner ? contract.customer_id : contract.owner_user_id;
+    if (recipientUserId) {
+      await createNotification({
+        recipientUserId,
+        actorUserId: authUser.id,
+        type: 'CONTRACT_UPDATED',
+        title: notificationTypeLabels.CONTRACT_UPDATED,
+        detail: `${authUser.name} a mis a jour le contrat ${contract.contract_number}.`,
+        relatedKind: 'contract',
+        relatedId: contract.id,
+        metadata: {
+          status: updatedRows[0].status,
+          responseMessage,
+          vehicleLabel: contract.vehicle_label,
+        },
+        targetPath: `/#/app/contracts?contract=${contract.id}`,
+      });
+    }
+
+    return res.json({
+      id: updatedRows[0].id,
+      status: contractStatusFromDb[updatedRows[0].status] || 'Actif',
+      responseMessage: updatedRows[0].response_message,
+      respondedAt: updatedRows[0].responded_at,
+      respondedByUserId: updatedRows[0].responded_by_user_id,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Mise a jour du contrat impossible.' });
+  }
+});
+
+app.get('/api/notifications', async (req, res) => {
+  try {
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
+    }
+
+    const notifications = await getNotificationFeedByUserId(authUser.id, 50);
+    return res.json(notifications);
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Notifications fetch failed' });
+  }
+});
+
+app.patch('/api/notifications/:notificationId/read', async (req, res) => {
+  try {
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
+    }
+
+    const { notificationId } = req.params;
+    if (!uuidPattern.test(notificationId)) {
+      return res.status(400).json({ message: 'Notification invalide.' });
+    }
+
+    const rows = await sql`
+      update app_notifications
+      set is_read = true,
+          read_at = now()
+      where id = ${notificationId}::uuid
+        and recipient_user_id = ${authUser.id}::uuid
+      returning id, is_read, read_at;
+    `;
+
+    if (rows.length === 0) {
+      return res.status(404).json({ message: 'Notification introuvable.' });
+    }
+
+    return res.json({ id: rows[0].id, isRead: rows[0].is_read, readAt: rows[0].read_at });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Notification update failed' });
+  }
+});
+
+app.get('/api/push/public-key', async (_req, res) => {
+  if (!webPushConfigured) {
+    return res.json({ enabled: false, publicKey: null });
+  }
+
+  return res.json({ enabled: true, publicKey: webPushPublicKey });
+});
+
+app.post('/api/push/subscriptions', async (req, res) => {
+  try {
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
+    }
+
+    if (!webPushConfigured) {
+      return res.status(503).json({ message: 'Push notifications not configured.' });
+    }
+
+    const subscription = normalizePushSubscriptionPayload(req.body);
+    if (!subscription) {
+      return res.status(400).json({ message: 'Abonnement push invalide.' });
+    }
+
+    const savedSubscription = await upsertPushSubscription({
+      userId: authUser.id,
+      subscription,
+      userAgent: sanitizeText(req.headers['user-agent']) || null,
+    });
+
+    return res.status(201).json({
+      ok: true,
+      id: savedSubscription?.id || null,
+      endpoint: savedSubscription?.endpoint || subscription.endpoint,
+    });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Enregistrement de l abonnement push impossible.' });
+  }
+});
+
+app.delete('/api/push/subscriptions', async (req, res) => {
+  try {
+    const authUser = requireAuthenticatedUser(req, res);
+    if (!authUser) {
+      return;
+    }
+
+    const endpoint = sanitizeText(req.body?.endpoint);
+    if (!endpoint) {
+      return res.status(400).json({ message: 'Endpoint push requis.' });
+    }
+
+    const removed = await deletePushSubscriptionByEndpoint({
+      userId: authUser.id,
+      endpoint,
+    });
+
+    return res.json({ ok: true, removed });
+  } catch (error) {
+    console.error(error);
+    return res.status(500).json({ message: 'Suppression de l abonnement push impossible.' });
   }
 });
 
@@ -3051,6 +3851,9 @@ app.get('/api/dashboard/owner', async (req, res) => {
         vr.pickup_mode,
         vr.contact_preference,
         vr.message,
+        vr.response_message,
+        vr.responded_at,
+        vr.responded_by_user_id,
         vr.created_at,
         coalesce(vr.customer_details ->> 'fullName', u.full_name) as customer_name,
         coalesce(vr.customer_details ->> 'email', u.email) as customer_email,
@@ -3123,7 +3926,7 @@ app.get('/api/dashboard/owner', async (req, res) => {
       return accumulator;
     }, {});
 
-    const notifications = buildOwnerNotificationFeed({ bookings, requestInbox, reviewFeed });
+    const notifications = await getNotificationFeedByUserId(userId, 12);
 
     res.json({
       ownerProfile: {

@@ -44,6 +44,8 @@ export const OwnerDashboard: React.FC = () => {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState('');
   const [expandedParkingId, setExpandedParkingId] = useState<string | null>(null);
+  const [requestActionId, setRequestActionId] = useState<string | null>(null);
+  const [notificationActionId, setNotificationActionId] = useState<string | null>(null);
 
   const isParcAuto = user?.role === UserRole.PARC_AUTO;
 
@@ -137,6 +139,48 @@ export const OwnerDashboard: React.FC = () => {
         : 'Direct';
 
     return <span className={`px-2.5 py-1 text-[11px] font-bold ${accent}`}>{label}</span>;
+  };
+
+  const handleRequestUpdate = async (requestId: string, status: 'CONTACTED' | 'APPROVED' | 'REJECTED') => {
+    const responseMessage = window.prompt('Message de reponse a envoyer au client (optionnel) :', '') || '';
+
+    try {
+      setRequestActionId(requestId);
+      const updatedRequest = await api.updateVehicleRequest(requestId, { status, responseMessage });
+      setData((current) => current ? {
+        ...current,
+        requestInbox: current.requestInbox.map((request) => request.id === requestId ? {
+          ...request,
+          status: updatedRequest.status,
+          response_message: updatedRequest.responseMessage ?? null,
+          responded_at: updatedRequest.respondedAt ?? null,
+          responded_by_user_id: updatedRequest.respondedByUserId ?? null,
+        } : request),
+      } : current);
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'Impossible de repondre a la demande.');
+    } finally {
+      setRequestActionId(null);
+    }
+  };
+
+  const handleNotificationRead = async (notificationId: string) => {
+    try {
+      setNotificationActionId(notificationId);
+      const updated = await api.markNotificationRead(notificationId);
+      setData((current) => current ? {
+        ...current,
+        notifications: current.notifications.map((notification) => notification.id === notificationId ? {
+          ...notification,
+          isRead: updated.isRead,
+          readAt: updated.readAt ?? null,
+        } : notification),
+      } : current);
+    } catch (updateError) {
+      setError(updateError instanceof Error ? updateError.message : 'Impossible de marquer la notification comme lue.');
+    } finally {
+      setNotificationActionId(null);
+    }
   };
 
   if (isLoading) {
@@ -526,6 +570,38 @@ export const OwnerDashboard: React.FC = () => {
                       {request.message && <p className="italic">"{request.message}"</p>}
                     </div>
                   )}
+                  {(request.response_message || request.responded_at) && (
+                    <div className="mt-3 border-t border-slate-200 pt-3 text-xs text-slate-600">
+                      {request.response_message && <p>Reponse: {request.response_message}</p>}
+                      {request.responded_at && <p className="mt-1 text-slate-500">Mis a jour le {new Date(request.responded_at).toLocaleString('fr-FR')}</p>}
+                    </div>
+                  )}
+                  <div className="mt-4 flex flex-wrap gap-2">
+                    <button
+                      type="button"
+                      onClick={() => handleRequestUpdate(request.id, 'CONTACTED')}
+                      disabled={requestActionId === request.id}
+                      className="border border-slate-200 bg-white px-3 py-2 text-[11px] font-bold text-slate-700 transition hover:border-slate-300 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Contacter
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRequestUpdate(request.id, 'APPROVED')}
+                      disabled={requestActionId === request.id}
+                      className="bg-emerald-600 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-emerald-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Accepter
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleRequestUpdate(request.id, 'REJECTED')}
+                      disabled={requestActionId === request.id}
+                      className="bg-rose-600 px-3 py-2 text-[11px] font-bold text-white transition hover:bg-rose-700 disabled:cursor-not-allowed disabled:opacity-60"
+                    >
+                      Refuser
+                    </button>
+                  </div>
                 </article>
               )) : (
                 <p className="text-sm text-slate-500">Aucune demande, aucun message ou aucune offre pour le moment.</p>
@@ -569,13 +645,25 @@ export const OwnerDashboard: React.FC = () => {
             </div>
             <div className="mt-5 space-y-3">
               {(data.notifications ?? []).length > 0 ? data.notifications.map((notification) => (
-                <article key={notification.id} className="border border-slate-200 bg-slate-50 p-4">
+                <article key={notification.id} className={`border p-4 ${notification.isRead ? 'border-slate-200 bg-slate-50' : 'border-indigo-200 bg-indigo-50/60'}`}>
                   <div className="flex items-start justify-between gap-3">
                     <div>
                       <p className="text-sm font-bold text-slate-900">{notification.title}</p>
                       <p className="mt-1 text-xs text-slate-500">{notification.detail}</p>
                     </div>
-                    <span className="text-[11px] font-semibold text-slate-400">{new Date(notification.createdAt).toLocaleDateString('fr-FR')}</span>
+                    <div className="text-right">
+                      <span className="text-[11px] font-semibold text-slate-400">{new Date(notification.createdAt).toLocaleDateString('fr-FR')}</span>
+                      {!notification.isRead && (
+                        <button
+                          type="button"
+                          onClick={() => handleNotificationRead(notification.id)}
+                          disabled={notificationActionId === notification.id}
+                          className="mt-2 block text-[11px] font-bold text-indigo-600 disabled:cursor-not-allowed disabled:opacity-60"
+                        >
+                          Marquer comme lue
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </article>
               )) : (
