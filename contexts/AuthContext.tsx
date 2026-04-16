@@ -17,7 +17,7 @@ interface User {
 interface AuthContextType {
   user: User | null;
   isAuthenticated: boolean;
-  login: (email: string, password: string) => Promise<void>;
+  login: (email: string, password: string, turnstileToken?: string) => Promise<void>;
   register: (payload: RegisterPayload) => Promise<RegisterResponse>;
   logout: () => Promise<void>;
   isLoading: boolean;
@@ -46,8 +46,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
     setUser(null);
   }), []);
 
-  const login = async (email: string, password: string) => {
-    const authenticatedUser = await api.login(email, password);
+  const login = async (email: string, password: string, turnstileToken?: string) => {
+    const authenticatedUser = await api.login(email, password, turnstileToken);
     setUser(authenticatedUser);
     persistStoredUser(authenticatedUser);
   };

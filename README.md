@@ -44,6 +44,8 @@ Exemple minimal dans [/.env.example](.env.example) :
 - `WEB_PUSH_PUBLIC_KEY`
 - `WEB_PUSH_PRIVATE_KEY`
 - `WEB_PUSH_SUBJECT`
+- `TURNSTILE_SECRET_KEY`
+- `VITE_TURNSTILE_SITE_KEY`
 
 Variables optionnelles pour les uploads photo parking/vehicule via Cloudflare R2 :
 
@@ -112,7 +114,8 @@ Frontend Render :
 12. `WEB_PUSH_PUBLIC_KEY`
 13. `WEB_PUSH_PRIVATE_KEY`
 14. `WEB_PUSH_SUBJECT=mailto:support@djambo-app.com`
-9. `PORT` sera injecté automatiquement par Render
+15. `TURNSTILE_SECRET_KEY=<cloudflare-turnstile-secret-key>`
+16. `PORT` sera injecté automatiquement par Render
 
 Le chatbot FleetMind passe par le backend et n expose plus de cle IA au frontend. La variable privilegiee cote Render peut etre `OPEN_AI_CHAT_BOT`; `OPENROUTER_API_KEY` reste acceptee comme alias.
 
@@ -143,6 +146,16 @@ Pour activer plus tard les uploads de photos parking/vehicule depuis le backend 
 ### 5. Variables Render à définir sur le frontend
 
 1. `VITE_API_BASE_URL=https://api.djambo-app.com`
+2. `VITE_TURNSTILE_SITE_KEY=<cloudflare-turnstile-site-key>`
+
+Cloudflare Turnstile pour login et inscription :
+
+1. Creez un widget Turnstile dans Cloudflare pour le domaine `djambo-app.com`.
+2. Recuperez la `site key` publique et la `secret key` privee.
+3. Cote frontend, utilisez `VITE_TURNSTILE_SITE_KEY`.
+4. Cote backend, utilisez `TURNSTILE_SECRET_KEY`.
+5. Les routes protegees en place ici sont `POST /api/auth/login` et `POST /api/auth/register`.
+6. Sans `TURNSTILE_SECRET_KEY`, la verification reste desactivee en local pour ne pas bloquer le developpement.
 
 ## Notes de developpement local
 

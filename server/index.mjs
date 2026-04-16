@@ -27,6 +27,7 @@ const openRouterApiKey = env.OPEN_AI_CHAT_BOT || env.OPENROUTER_API_KEY || '';
 const webPushPublicKey = env.WEB_PUSH_PUBLIC_KEY || '';
 const webPushPrivateKey = env.WEB_PUSH_PRIVATE_KEY || '';
 const webPushSubject = env.WEB_PUSH_SUBJECT || 'mailto:support@djambo-app.com';
+const turnstileSecretKey = env.TURNSTILE_SECRET_KEY || '';
 const webPushConfigured = Boolean(webPushPublicKey && webPushPrivateKey);
 const openRouterModel = env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001';
 const aiCacheTtlMs = Math.max(60_000, Number(env.AI_CACHE_TTL_MS || 21_600_000) || 21_600_000);
@@ -45,6 +46,7 @@ const allowedOrigins = (env.ALLOWED_ORIGINS || `${normalizedAppUrl},http://local
   .map((origin) => origin.trim())
   .filter(Boolean);
 const localOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
+const turnstileVerifyEndpoint = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const mediaDirectory = path.join(workspaceRoot, 'uploads');
 const defaultVehicleReleaseTime = '10:00';
 const uploadStorageProvider = env.UPLOAD_STORAGE_PROVIDER || 'local';
@@ -71,6 +73,55 @@ if (webPushConfigured) {
 const getRequestUserId = (req) => req.authUser?.id || null;
 
 const getRequestUserRole = (req) => req.authUser?.role || null;
+
+const getRequestIpAddress = (req) => {
+  const forwardedFor = req.headers['x-forwarded-for'];
+  if (typeof forwardedFor === 'string' && forwardedFor.trim()) {
+    return forwardedFor.split(',')[0].trim();
+  }
+
+  return req.ip || '';
+};
+
+const verifyTurnstileToken = async ({ token, action, remoteip }) => {
+  if (!turnstileSecretKey) {
+    return { ok: true, skipped: true };
+  }
+
+  if (!token) {
+    return { ok: false, message: 'Verification Cloudflare requise.' };
+  }
+
+  const formData = new URLSearchParams();
+  formData.set('secret', turnstileSecretKey);
+  formData.set('response', token);
+  if (remoteip) {
+    formData.set('remoteip', remoteip);
+  }
+
+  const response = await fetch(turnstileVerifyEndpoint, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/x-www-form-urlencoded',
+    },
+    body: formData.toString(),
+  });
+
+  if (!response.ok) {
+    return { ok: false, message: 'Verification Cloudflare indisponible.' };
+  }
+
+  const payload = await response.json();
+  if (!payload.success) {
+    return { ok: false, message: 'Verification Cloudflare invalide.' };
+  }
+
+  if (payload.action && action && payload.action !== action) {
+    return { ok: false, message: 'Verification Cloudflare non conforme.' };
+  }
+
+  return { ok: true, skipped: false };
+};
 
 const hashSessionToken = (token) => crypto.createHash('sha256').update(token).digest('hex');
 
@@ -2203,7 +2254,7 @@ app.get(/^\/api\/media\/(.+)$/, async (req, res) => {
 
 app.post('/api/auth/register', async (req, res) => {
   try {
-    const { name, firstName, lastName, email, password, role, profileData } = req.body;
+    const { name, firstName, lastName, email, password, role, profileData, turnstileToken } = req.body;
     const normalizedRole = role ?? 'USER';
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
     const fullName = typeof name === 'string' && name.trim()
@@ -2225,6 +2276,15 @@ app.post('/api/auth/register', async (req, res) => {
 
     if (!fullName || !normalizedEmail || !password) {
       return res.status(400).json({ message: 'Missing registration fields' });
+    }
+
+    const turnstileCheck = await verifyTurnstileToken({
+      token: typeof turnstileToken === 'string' ? turnstileToken : '',
+      action: 'register',
+      remoteip: getRequestIpAddress(req),
+    });
+    if (!turnstileCheck.ok) {
+      return res.status(400).json({ message: turnstileCheck.message });
     }
 
     if (normalizedRole === 'PARC_AUTO' && (!safeProfileData.companyName || !safeProfileData.parkingName || !safeProfileData.city || !safeProfileData.country)) {
@@ -2385,8 +2445,19 @@ app.post('/api/auth/register', async (req, res) => {
 
 app.post('/api/auth/login', async (req, res) => {
   try {
-    const { email, password } = req.body;
-    const result = await sql`select id, full_name, email, role, phone, password_hash, email_verified from app_users where email = ${email}`;
+    const { email, password, turnstileToken } = req.body;
+    const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+
+    const turnstileCheck = await verifyTurnstileToken({
+      token: typeof turnstileToken === 'string' ? turnstileToken : '',
+      action: 'login',
+      remoteip: getRequestIpAddress(req),
+    });
+    if (!turnstileCheck.ok) {
+      return res.status(400).json({ message: turnstileCheck.message });
+    }
+
+    const result = await sql`select id, full_name, email, role, phone, password_hash, email_verified from app_users where email = ${normalizedEmail}`;
     if (result.length === 0) {
       return res.status(401).json({ message: 'Invalid credentials' });
     }

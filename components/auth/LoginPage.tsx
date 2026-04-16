@@ -3,12 +3,15 @@ import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Lock, Mail, ArrowRight, Loader2, ChevronLeft } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
+import { TurnstileField } from './TurnstileField';
 
 const LOGIN_ILLUSTRATION_SRC = new URL('../../login-images.jpg', import.meta.url).href;
+const turnstileEnabled = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY);
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
   const [password, setPassword] = useState('');
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [error, setError] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { login } = useAuth();
@@ -17,9 +20,15 @@ export const LoginPage: React.FC = () => {
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
     setError('');
+
+    if (turnstileEnabled && !turnstileToken) {
+      setError('Veuillez valider la verification Cloudflare avant de continuer.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
-      await login(email, password);
+      await login(email, password, turnstileToken || undefined);
       navigate('/app/dashboard');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Échec de la connexion. Vérifiez vos identifiants.');
@@ -102,6 +111,12 @@ export const LoginPage: React.FC = () => {
                     />
                   </div>
                 </div>
+
+                <TurnstileField
+                  action="login"
+                  onTokenChange={(token) => setTurnstileToken(token)}
+                  onTokenExpired={() => setTurnstileToken('')}
+                />
 
                 <div>
                   <button

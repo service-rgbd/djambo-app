@@ -1,10 +1,9 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useRef, useState } from 'react';
 import { Link } from 'react-router-dom';
 import {
   Area,
   AreaChart,
   CartesianGrid,
-  ResponsiveContainer,
   Tooltip,
   XAxis,
   YAxis,
@@ -102,7 +101,8 @@ const SignalRow: React.FC<{
 export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
   const { user } = useAuth();
   const [copied, setCopied] = useState(false);
-  const [isChartReady, setIsChartReady] = useState(false);
+  const chartContainerRef = useRef<HTMLDivElement | null>(null);
+  const [chartDimensions, setChartDimensions] = useState({ width: 0, height: 0 });
   const [dashboardStats, setDashboardStats] = useState<FleetStats & { availableVehicles?: number; totalParkings?: number } | null>(stats ?? null);
   const [dashboardRevenueData, setDashboardRevenueData] = useState<RevenueData[]>(revenueData ?? []);
   const [dashboardVehicles, setDashboardVehicles] = useState<OwnerVehicleSummary[]>([]);
@@ -131,7 +131,29 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
   };
 
   useEffect(() => {
-    setIsChartReady(true);
+    const element = chartContainerRef.current;
+    if (!element) {
+      return undefined;
+    }
+
+    const syncDimensions = () => {
+      const bounds = element.getBoundingClientRect();
+      setChartDimensions({
+        width: Math.max(0, Math.round(bounds.width)),
+        height: Math.max(0, Math.round(bounds.height)),
+      });
+    };
+
+    syncDimensions();
+
+    if (typeof ResizeObserver === 'undefined') {
+      window.addEventListener('resize', syncDimensions);
+      return () => window.removeEventListener('resize', syncDimensions);
+    }
+
+    const observer = new ResizeObserver(() => syncDimensions());
+    observer.observe(element);
+    return () => observer.disconnect();
   }, []);
 
   useEffect(() => {
@@ -475,10 +497,9 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
             </div>
           </div>
 
-          <div className="mt-6 h-72 w-full min-w-0 sm:h-80">
-            {isChartReady ? (
-              <ResponsiveContainer width="100%" height="100%" minWidth={280}>
-                <AreaChart data={dashboardRevenueData} margin={{ top: 10, right: 12, left: -18, bottom: 0 }}>
+          <div ref={chartContainerRef} className="mt-6 h-72 w-full min-w-[280px] sm:h-80">
+            {chartDimensions.width > 0 && chartDimensions.height > 0 ? (
+              <AreaChart width={chartDimensions.width} height={chartDimensions.height} data={dashboardRevenueData} margin={{ top: 10, right: 12, left: -18, bottom: 0 }}>
                   <defs>
                     <linearGradient id="dashboardRevenueGradient" x1="0" y1="0" x2="0" y2="1">
                       <stop offset="5%" stopColor="#4f46e5" stopOpacity={0.18} />
@@ -494,7 +515,6 @@ export const Dashboard: React.FC<DashboardProps> = ({ stats, revenueData }) => {
                   />
                   <Area type="monotone" dataKey="revenue" stroke="#4f46e5" strokeWidth={2.5} fillOpacity={1} fill="url(#dashboardRevenueGradient)" />
                 </AreaChart>
-              </ResponsiveContainer>
             ) : (
               <div className="flex h-full items-center justify-center border border-slate-200 bg-slate-50 text-sm text-slate-500">
                 Initialisation du graphique...

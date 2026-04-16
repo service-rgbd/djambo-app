@@ -300,6 +300,7 @@ export type RegisterPayload = {
   email: string;
   password: string;
   role: UserRole;
+  turnstileToken?: string;
   profileData: {
     phone?: string;
     city?: string;
@@ -740,9 +741,9 @@ const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
 };
 
 export const api = {
-  login: (email: string, password: string) => apiRequest<StoredUser>('/api/auth/login', {
+  login: (email: string, password: string, turnstileToken?: string) => apiRequest<StoredUser>('/api/auth/login', {
     method: 'POST',
-    body: JSON.stringify({ email: normalizeEmail(email), password }),
+    body: JSON.stringify({ email: normalizeEmail(email), password, turnstileToken }),
   }),
   logout: () => apiRequest<{ ok: true }>('/api/auth/logout', {
     method: 'POST',

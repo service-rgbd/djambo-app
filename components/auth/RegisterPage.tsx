@@ -5,8 +5,10 @@ import { Lock, Mail, User, ArrowRight, Loader2, ChevronLeft, UserCheck, ShieldCh
 import { UserRole } from '../../types';
 import { BrandLogo } from '../BrandLogo';
 import { ResolvedCurrentLocation, resolveCurrentLocation } from '../../services/location';
+import { TurnstileField } from './TurnstileField';
 
 const REGISTER_ILLUSTRATION_SRC = new URL('../../register-bc.jpg', import.meta.url).href;
+const turnstileEnabled = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY);
 
 export const RegisterPage: React.FC = () => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -29,6 +31,7 @@ export const RegisterPage: React.FC = () => {
   const [isLocatingParking, setIsLocatingParking] = useState(false);
   const [selectedRole, setSelectedRole] = useState<UserRole>(UserRole.USER);
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [turnstileToken, setTurnstileToken] = useState('');
   const [error, setError] = useState('');
   const [successMessage, setSuccessMessage] = useState('');
   const [registeredEmail, setRegisteredEmail] = useState('');
@@ -38,6 +41,12 @@ export const RegisterPage: React.FC = () => {
     e.preventDefault();
     setError('');
     setSuccessMessage('');
+
+    if (turnstileEnabled && !turnstileToken) {
+      setError('Veuillez valider la verification Cloudflare avant de creer le compte.');
+      return;
+    }
+
     setIsSubmitting(true);
     try {
       const registration = await register({
@@ -46,6 +55,7 @@ export const RegisterPage: React.FC = () => {
         email,
         password,
         role: selectedRole,
+        turnstileToken: turnstileToken || undefined,
         profileData: {
           phone,
           city,
@@ -582,6 +592,12 @@ export const RegisterPage: React.FC = () => {
                     {error}
                   </div>
                 )}
+
+                <TurnstileField
+                  action="register"
+                  onTokenChange={(token) => setTurnstileToken(token)}
+                  onTokenExpired={() => setTurnstileToken('')}
+                />
 
                 <div>
                   <button
