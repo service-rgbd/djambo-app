@@ -1,14 +1,13 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Lock, Mail, User, ArrowRight, Loader2, ChevronLeft, UserCheck, ShieldCheck, ArrowLeft, Warehouse, UserRound, Phone, Building2, MapPin, MailCheck, Check, LocateFixed } from 'lucide-react';
 import { UserRole } from '../../types';
 import { BrandLogo } from '../BrandLogo';
 import { ResolvedCurrentLocation, resolveCurrentLocation } from '../../services/location';
-import { TurnstileField } from './TurnstileField';
+import { TurnstileField, useTurnstileConfig } from './TurnstileField';
 
 const REGISTER_ILLUSTRATION_SRC = new URL('../../register-bc.jpg', import.meta.url).href;
-const turnstileEnabled = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY);
 
 export const RegisterPage: React.FC = () => {
   const [step, setStep] = useState<1 | 2 | 3>(1);
@@ -36,6 +35,13 @@ export const RegisterPage: React.FC = () => {
   const [successMessage, setSuccessMessage] = useState('');
   const [registeredEmail, setRegisteredEmail] = useState('');
   const { register } = useAuth();
+  const { enabled: turnstileEnabled, isLoading: isTurnstileLoading, siteKey: runtimeTurnstileSiteKey } = useTurnstileConfig();
+
+  useEffect(() => {
+    if (!turnstileEnabled) {
+      setTurnstileToken('');
+    }
+  }, [turnstileEnabled]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -595,14 +601,16 @@ export const RegisterPage: React.FC = () => {
 
                 <TurnstileField
                   action="register"
+                  isLoading={isTurnstileLoading}
                   onTokenChange={(token) => setTurnstileToken(token)}
                   onTokenExpired={() => setTurnstileToken('')}
+                  siteKey={runtimeTurnstileSiteKey}
                 />
 
                 <div>
                   <button
                     type="submit"
-                    disabled={isSubmitting || !isFormValid}
+                    disabled={isSubmitting || isTurnstileLoading || !isFormValid}
                     className="group relative flex w-full justify-center rounded-2xl bg-slate-950 px-5 py-3 text-sm font-bold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-slate-400"
                   >
                     {isSubmitting ? (

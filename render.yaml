@@ -48,6 +48,8 @@ services:
         value: mailto:support@djambo-app.com
       - key: TURNSTILE_SECRET_KEY
         sync: false
+      - key: TURNSTILE_SITE_KEY
+        sync: false
       - key: OPENROUTER_MODEL
         value: google/gemini-2.0-flash-001
       - key: AI_CACHE_TTL_MS

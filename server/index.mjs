@@ -28,6 +28,7 @@ const webPushPublicKey = env.WEB_PUSH_PUBLIC_KEY || '';
 const webPushPrivateKey = env.WEB_PUSH_PRIVATE_KEY || '';
 const webPushSubject = env.WEB_PUSH_SUBJECT || 'mailto:support@djambo-app.com';
 const turnstileSecretKey = env.TURNSTILE_SECRET_KEY || '';
+const turnstileSiteKey = env.TURNSTILE_SITE_KEY || env.VITE_TURNSTILE_SITE_KEY || '';
 const webPushConfigured = Boolean(webPushPublicKey && webPushPrivateKey);
 const openRouterModel = env.OPENROUTER_MODEL || 'google/gemini-2.0-flash-001';
 const aiCacheTtlMs = Math.max(60_000, Number(env.AI_CACHE_TTL_MS || 21_600_000) || 21_600_000);
@@ -1644,6 +1645,14 @@ app.get('/api/auth/verify-email', async (req, res) => {
 app.get('/api/health', async (_req, res) => {
   const now = await sql`select now() as now`;
   res.json({ ok: true, service: 'djambo-api', now: now[0].now });
+});
+
+app.get('/api/auth/turnstile/config', (_req, res) => {
+  const enabled = Boolean(turnstileSecretKey && turnstileSiteKey);
+  res.json({
+    enabled,
+    siteKey: enabled ? turnstileSiteKey : null,
+  });
 });
 
 app.get('/api/marketplace/vehicles', async (_req, res) => {

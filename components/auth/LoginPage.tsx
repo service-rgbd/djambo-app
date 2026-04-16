@@ -1,12 +1,11 @@
-import React, { useState } from 'react';
+import React, { useEffect, useState } from 'react';
 import { useNavigate, Link } from 'react-router-dom';
 import { useAuth } from '../../contexts/AuthContext';
 import { Lock, Mail, ArrowRight, Loader2, ChevronLeft } from 'lucide-react';
 import { BrandLogo } from '../BrandLogo';
-import { TurnstileField } from './TurnstileField';
+import { TurnstileField, useTurnstileConfig } from './TurnstileField';
 
 const LOGIN_ILLUSTRATION_SRC = new URL('../../login-images.jpg', import.meta.url).href;
-const turnstileEnabled = Boolean(import.meta.env.VITE_TURNSTILE_SITE_KEY);
 
 export const LoginPage: React.FC = () => {
   const [email, setEmail] = useState('');
@@ -16,6 +15,13 @@ export const LoginPage: React.FC = () => {
   const [isSubmitting, setIsSubmitting] = useState(false);
   const { login } = useAuth();
   const navigate = useNavigate();
+  const { enabled: turnstileEnabled, isLoading: isTurnstileLoading, siteKey: runtimeTurnstileSiteKey } = useTurnstileConfig();
+
+  useEffect(() => {
+    if (!turnstileEnabled) {
+      setTurnstileToken('');
+    }
+  }, [turnstileEnabled]);
 
   const handleSubmit = async (e: React.FormEvent<HTMLFormElement>) => {
     e.preventDefault();
@@ -114,14 +120,16 @@ export const LoginPage: React.FC = () => {
 
                 <TurnstileField
                   action="login"
+                  isLoading={isTurnstileLoading}
                   onTokenChange={(token) => setTurnstileToken(token)}
                   onTokenExpired={() => setTurnstileToken('')}
+                  siteKey={runtimeTurnstileSiteKey}
                 />
 
                 <div>
                   <button
                     type="submit"
-                    disabled={isSubmitting}
+                    disabled={isSubmitting || isTurnstileLoading}
                     translate="no"
                     className="group relative flex w-full justify-center rounded-2xl bg-slate-950 px-4 py-3 text-sm font-bold text-white transition-all duration-300 hover:-translate-y-0.5 hover:bg-indigo-600 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 disabled:bg-slate-400"
                   >

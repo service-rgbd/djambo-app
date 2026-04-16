@@ -206,6 +206,11 @@ export type PrivateAppSettings = {
   contractBanner?: string;
 };
 
+export type TurnstileConfigResponse = {
+  enabled: boolean;
+  siteKey: string | null;
+};
+
 export type OwnerInventoryVehicle = {
   id: string;
   title: string;
@@ -741,6 +746,7 @@ const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
 };
 
 export const api = {
+  getTurnstileConfig: () => apiRequest<TurnstileConfigResponse>('/api/auth/turnstile/config'),
   login: (email: string, password: string, turnstileToken?: string) => apiRequest<StoredUser>('/api/auth/login', {
     method: 'POST',
     body: JSON.stringify({ email: normalizeEmail(email), password, turnstileToken }),
