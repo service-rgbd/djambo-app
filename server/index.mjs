@@ -50,6 +50,11 @@ const localOriginPattern = /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i;
 const turnstileVerifyEndpoint = 'https://challenges.cloudflare.com/turnstile/v0/siteverify';
 const mediaDirectory = path.join(workspaceRoot, 'uploads');
 const defaultVehicleReleaseTime = '10:00';
+const loginAttemptLimit = 3;
+const loginBlockDurationMs = 60_000;
+const loginPostBlockAttemptLimit = 2;
+const loginAttemptStateTtlMs = 15 * 60_000;
+const automaticResetCooldownMs = 30 * 60_000;
 const uploadStorageProvider = env.UPLOAD_STORAGE_PROVIDER || 'local';
 const maxUploadSizeMb = Math.max(1, Number(env.MAX_UPLOAD_SIZE_MB || 10) || 10);
 const maxUploadSizeBytes = maxUploadSizeMb * 1024 * 1024;
@@ -66,6 +71,20 @@ const r2Client = uploadStorageProvider === 'r2' && env.R2_ACCOUNT_ID && env.R2_B
   : null;
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+const loginAttemptStates = new Map();
+
+const defaultApiErrorTitles = {
+  400: 'Action impossible',
+  401: 'Connexion refusée',
+  403: 'Accès limité',
+  404: 'Élément introuvable',
+  409: 'Action déjà traitée',
+  413: 'Contenu trop volumineux',
+  429: 'Patientez un instant',
+  500: 'Incident temporaire',
+  502: 'Service indisponible',
+  503: 'Service temporairement indisponible',
+};
 
 if (webPushConfigured) {
   webpush.setVapidDetails(webPushSubject, webPushPublicKey, webPushPrivateKey);
@@ -84,13 +103,145 @@ const getRequestIpAddress = (req) => {
   return req.ip || '';
 };
 
+const buildApiErrorPayload = ({ status, code, title, message, details, retryAfterSeconds }) => ({
+  ok: false,
+  message,
+  error: {
+    status,
+    code,
+    title: title || defaultApiErrorTitles[status] || 'Incident temporaire',
+    message,
+    ...(details ? { details } : {}),
+    ...(retryAfterSeconds ? { retryAfterSeconds } : {}),
+  },
+});
+
+const sendApiError = (res, { status, code, title, message, details, retryAfterSeconds }) => {
+  if (retryAfterSeconds) {
+    res.setHeader('Retry-After', String(retryAfterSeconds));
+  }
+
+  return res.status(status).json(buildApiErrorPayload({
+    status,
+    code,
+    title,
+    message,
+    details,
+    retryAfterSeconds,
+  }));
+};
+
+const buildLoginAttemptKey = (email, ipAddress) => {
+  const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+  if (normalizedEmail) {
+    return `email:${normalizedEmail}`;
+  }
+
+  return `ip:${ipAddress || 'unknown'}`;
+};
+
+const getLoginAttemptState = (attemptKey) => {
+  const now = Date.now();
+  const existingState = loginAttemptStates.get(attemptKey);
+
+  if (existingState && now - existingState.lastTouchedAt <= loginAttemptStateTtlMs) {
+    return existingState;
+  }
+
+  const freshState = {
+    failedAttempts: 0,
+    postBlockFailures: 0,
+    hasCompletedInitialBlock: false,
+    blockedUntil: 0,
+    lastTouchedAt: now,
+    lastAutomaticResetAt: 0,
+  };
+  loginAttemptStates.set(attemptKey, freshState);
+  return freshState;
+};
+
+const getLoginBlockState = (attemptKey) => {
+  const state = getLoginAttemptState(attemptKey);
+  const now = Date.now();
+
+  if (state.blockedUntil <= now) {
+    return null;
+  }
+
+  return {
+    retryAfterSeconds: Math.max(1, Math.ceil((state.blockedUntil - now) / 1000)),
+  };
+};
+
+const clearLoginAttemptState = (attemptKey) => {
+  loginAttemptStates.delete(attemptKey);
+};
+
+const registerFailedLoginAttempt = (attemptKey) => {
+  const state = getLoginAttemptState(attemptKey);
+  const now = Date.now();
+  state.lastTouchedAt = now;
+
+  if (state.hasCompletedInitialBlock) {
+    state.postBlockFailures += 1;
+
+    if (state.postBlockFailures >= loginPostBlockAttemptLimit) {
+      state.postBlockFailures = 0;
+      state.blockedUntil = now + loginBlockDurationMs;
+
+      const shouldSendResetEmail = now - state.lastAutomaticResetAt >= automaticResetCooldownMs;
+      if (shouldSendResetEmail) {
+        state.lastAutomaticResetAt = now;
+      }
+
+      return {
+        blocked: true,
+        retryAfterSeconds: Math.ceil(loginBlockDurationMs / 1000),
+        shouldSendResetEmail,
+      };
+    }
+
+    return {
+      blocked: false,
+      retryAfterSeconds: 0,
+      shouldSendResetEmail: false,
+    };
+  }
+
+  state.failedAttempts += 1;
+  if (state.failedAttempts >= loginAttemptLimit) {
+    state.failedAttempts = 0;
+    state.postBlockFailures = 0;
+    state.hasCompletedInitialBlock = true;
+    state.blockedUntil = now + loginBlockDurationMs;
+
+    return {
+      blocked: true,
+      retryAfterSeconds: Math.ceil(loginBlockDurationMs / 1000),
+      shouldSendResetEmail: false,
+    };
+  }
+
+  return {
+    blocked: false,
+    retryAfterSeconds: 0,
+    shouldSendResetEmail: false,
+  };
+};
+
 const verifyTurnstileToken = async ({ token, action, remoteip }) => {
   if (!turnstileSecretKey) {
     return { ok: true, skipped: true };
   }
 
   if (!token) {
-    return { ok: false, message: 'Verification Cloudflare requise.' };
+    return {
+      ok: false,
+      status: 400,
+      code: 'TURNSTILE_REQUIRED',
+      title: 'Vérification requise',
+      message: 'Validez la vérification Cloudflare avant de continuer.',
+    };
   }
 
   const formData = new URLSearchParams();
@@ -109,16 +260,34 @@ const verifyTurnstileToken = async ({ token, action, remoteip }) => {
   });
 
   if (!response.ok) {
-    return { ok: false, message: 'Verification Cloudflare indisponible.' };
+    return {
+      ok: false,
+      status: 503,
+      code: 'TURNSTILE_UNAVAILABLE',
+      title: 'Vérification indisponible',
+      message: 'La vérification Cloudflare est momentanément indisponible. Réessayez dans un instant.',
+    };
   }
 
   const payload = await response.json();
   if (!payload.success) {
-    return { ok: false, message: 'Verification Cloudflare invalide.' };
+    return {
+      ok: false,
+      status: 400,
+      code: 'TURNSTILE_INVALID',
+      title: 'Vérification invalide',
+      message: 'La vérification Cloudflare a expiré ou n a pas pu être validée. Merci de recommencer.',
+    };
   }
 
   if (payload.action && action && payload.action !== action) {
-    return { ok: false, message: 'Verification Cloudflare non conforme.' };
+    return {
+      ok: false,
+      status: 400,
+      code: 'TURNSTILE_ACTION_MISMATCH',
+      title: 'Vérification invalide',
+      message: 'La vérification Cloudflare ne correspond pas à cette action. Merci de recommencer.',
+    };
   }
 
   return { ok: true, skipped: false };
@@ -217,7 +386,12 @@ const resolveAuthenticatedUser = async (req) => {
 
 const requireAuthenticatedUser = (req, res) => {
   if (!req.authUser) {
-    res.status(401).json({ message: 'Authentification requise.' });
+    sendApiError(res, {
+      status: 401,
+      code: 'AUTH_REQUIRED',
+      title: 'Connexion requise',
+      message: 'Connectez-vous pour accéder à cette section.',
+    });
     return null;
   }
 
@@ -233,6 +407,36 @@ const normalizeReservationMode = (value) => {
 };
 
 const sanitizeText = (value) => typeof value === 'string' ? value.trim() : '';
+
+const issuePasswordResetForUser = async (user) => {
+  if (!user?.id || !user?.email || !user?.full_name || user.email_verified === false) {
+    return { sent: false };
+  }
+
+  const resetToken = crypto.randomBytes(32).toString('hex');
+  const tokenHash = hashVerificationToken(resetToken);
+
+  await sql.begin(async (transaction) => {
+    await transaction`
+      delete from password_reset_tokens
+      where user_id = ${user.id};
+    `;
+
+    await transaction`
+      insert into password_reset_tokens (user_id, token_hash, expires_at)
+      values (${user.id}, ${tokenHash}, now() + interval '30 minutes');
+    `;
+  });
+
+  const resetUrl = `${normalizedAppUrl}/#/reset-password?token=${resetToken}`;
+  await sendPasswordResetEmail({
+    to: user.email,
+    name: user.full_name,
+    resetUrl,
+  });
+
+  return { sent: true };
+};
 
 const normalizeAiPrompt = (value) => sanitizeText(value)
   .toLowerCase()
@@ -2284,7 +2488,12 @@ app.post('/api/auth/register', async (req, res) => {
     };
 
     if (!fullName || !normalizedEmail || !password) {
-      return res.status(400).json({ message: 'Missing registration fields' });
+      return sendApiError(res, {
+        status: 400,
+        code: 'REGISTRATION_FIELDS_REQUIRED',
+        title: 'Informations incomplètes',
+        message: 'Renseignez les informations indispensables avant de créer votre compte.',
+      });
     }
 
     const turnstileCheck = await verifyTurnstileToken({
@@ -2293,24 +2502,44 @@ app.post('/api/auth/register', async (req, res) => {
       remoteip: getRequestIpAddress(req),
     });
     if (!turnstileCheck.ok) {
-      return res.status(400).json({ message: turnstileCheck.message });
+      return sendApiError(res, turnstileCheck);
     }
 
     if (normalizedRole === 'PARC_AUTO' && (!safeProfileData.companyName || !safeProfileData.parkingName || !safeProfileData.city || !safeProfileData.country)) {
-      return res.status(400).json({ message: 'Les informations du parc auto sont incompletes.' });
+      return sendApiError(res, {
+        status: 400,
+        code: 'PARKING_PROFILE_INCOMPLETE',
+        title: 'Profil incomplet',
+        message: 'Complétez les informations du parc auto pour finaliser votre inscription.',
+      });
     }
 
     if (normalizedRole === 'ADMIN' && !safeProfileData.department) {
-      return res.status(400).json({ message: 'Le service d administration est requis.' });
+      return sendApiError(res, {
+        status: 400,
+        code: 'DEPARTMENT_REQUIRED',
+        title: 'Profil incomplet',
+        message: 'Précisez le service d administration avant de continuer.',
+      });
     }
 
     if (normalizedRole === 'PARTICULIER' && !safeProfileData.city) {
-      return res.status(400).json({ message: 'La ville est requise pour un proprietaire particulier.' });
+      return sendApiError(res, {
+        status: 400,
+        code: 'OWNER_CITY_REQUIRED',
+        title: 'Profil incomplet',
+        message: 'Ajoutez votre ville pour terminer la création du compte.',
+      });
     }
 
     const existing = await sql`select id from app_users where email = ${normalizedEmail}`;
     if (existing.length > 0) {
-      return res.status(409).json({ message: 'Email already exists' });
+      return sendApiError(res, {
+        status: 409,
+        code: 'EMAIL_ALREADY_USED',
+        title: 'Compte déjà existant',
+        message: 'Un compte est déjà associé à cette adresse. Utilisez la connexion ou la réinitialisation du mot de passe.',
+      });
     }
 
     const verificationToken = crypto.randomBytes(32).toString('hex');
@@ -2448,7 +2677,12 @@ app.post('/api/auth/register', async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: error instanceof Error ? error.message : 'Registration failed' });
+    return sendApiError(res, {
+      status: 500,
+      code: 'REGISTRATION_FAILED',
+      title: 'Inscription indisponible',
+      message: 'L inscription ne peut pas être finalisée pour le moment. Réessayez dans quelques instants.',
+    });
   }
 });
 
@@ -2456,6 +2690,28 @@ app.post('/api/auth/login', async (req, res) => {
   try {
     const { email, password, turnstileToken } = req.body;
     const normalizedEmail = typeof email === 'string' ? email.trim().toLowerCase() : '';
+    const passwordValue = typeof password === 'string' ? password : '';
+    const attemptKey = buildLoginAttemptKey(normalizedEmail, getRequestIpAddress(req));
+
+    if (!normalizedEmail || !passwordValue) {
+      return sendApiError(res, {
+        status: 400,
+        code: 'LOGIN_FIELDS_REQUIRED',
+        title: 'Connexion incomplète',
+        message: 'Saisissez votre adresse email et votre mot de passe pour continuer.',
+      });
+    }
+
+    const currentBlock = getLoginBlockState(attemptKey);
+    if (currentBlock) {
+      return sendApiError(res, {
+        status: 429,
+        code: 'LOGIN_TEMPORARILY_BLOCKED',
+        title: 'Connexion temporairement suspendue',
+        message: 'Par sécurité, la connexion est suspendue pendant 1 minute après plusieurs tentatives. Réessayez ensuite.',
+        retryAfterSeconds: currentBlock.retryAfterSeconds,
+      });
+    }
 
     const turnstileCheck = await verifyTurnstileToken({
       token: typeof turnstileToken === 'string' ? turnstileToken : '',
@@ -2463,25 +2719,57 @@ app.post('/api/auth/login', async (req, res) => {
       remoteip: getRequestIpAddress(req),
     });
     if (!turnstileCheck.ok) {
-      return res.status(400).json({ message: turnstileCheck.message });
+      return sendApiError(res, turnstileCheck);
     }
 
     const result = await sql`select id, full_name, email, role, phone, password_hash, email_verified from app_users where email = ${normalizedEmail}`;
-    if (result.length === 0) {
-      return res.status(401).json({ message: 'Invalid credentials' });
+    const user = result[0] || null;
+    const invalidLoginMessage = 'Connexion impossible pour le moment. Vérifiez vos informations saisies ou utilisez la réinitialisation du mot de passe.';
+
+    if (!user || user.password_hash !== hashPassword(passwordValue)) {
+      const attemptOutcome = registerFailedLoginAttempt(attemptKey);
+
+      if (attemptOutcome.shouldSendResetEmail && user) {
+        issuePasswordResetForUser(user).catch((resetError) => {
+          console.error('Automatic password reset email failed', resetError);
+        });
+      }
+
+      if (attemptOutcome.blocked) {
+        return sendApiError(res, {
+          status: 429,
+          code: 'LOGIN_TEMPORARILY_BLOCKED',
+          title: 'Connexion temporairement suspendue',
+          message: attemptOutcome.shouldSendResetEmail
+            ? 'Par sécurité, la connexion est suspendue pendant 1 minute. Si votre compte existe déjà, un email de réinitialisation vient d être envoyé.'
+            : 'Par sécurité, la connexion est suspendue pendant 1 minute après plusieurs tentatives. Réessayez ensuite.',
+          retryAfterSeconds: attemptOutcome.retryAfterSeconds,
+        });
+      }
+
+      return sendApiError(res, {
+        status: 401,
+        code: 'LOGIN_REJECTED',
+        title: 'Connexion impossible',
+        message: invalidLoginMessage,
+      });
     }
-    const user = result[0];
-    if (user.password_hash !== hashPassword(password)) {
-      return res.status(401).json({ message: 'Invalid credentials' });
-    }
+
     if (!user.email_verified) {
-      return res.status(403).json({ message: 'Veuillez confirmer votre adresse email avant de vous connecter.' });
+      return sendApiError(res, {
+        status: 403,
+        code: 'LOGIN_VERIFICATION_PENDING',
+        title: 'Connexion indisponible',
+        message: 'La connexion ne peut pas être finalisée pour le moment. Si vous venez de créer un compte, vérifiez aussi votre boite email.',
+      });
     }
 
     const session = await createSessionForUser({
       user: { id: user.id },
       req,
     });
+
+    clearLoginAttemptState(attemptKey);
 
     res.json({
       id: user.id,
@@ -2494,7 +2782,12 @@ app.post('/api/auth/login', async (req, res) => {
     });
   } catch (error) {
     console.error(error);
-    res.status(500).json({ message: 'Login failed' });
+    return sendApiError(res, {
+      status: 500,
+      code: 'LOGIN_FAILED',
+      title: 'Connexion indisponible',
+      message: 'La connexion ne peut pas être traitée pour le moment. Réessayez dans quelques instants.',
+    });
   }
 });
 
@@ -2521,7 +2814,12 @@ app.post('/api/auth/forgot-password', async (req, res) => {
   try {
     const email = typeof req.body.email === 'string' ? req.body.email.trim().toLowerCase() : '';
     if (!email) {
-      return res.status(400).json({ message: 'Adresse email requise.' });
+      return sendApiError(res, {
+        status: 400,
+        code: 'FORGOT_PASSWORD_EMAIL_REQUIRED',
+        title: 'Adresse email requise',
+        message: 'Saisissez votre adresse email pour recevoir le lien de réinitialisation.',
+      });
     }
 
     const users = await sql`
@@ -2536,32 +2834,17 @@ app.post('/api/auth/forgot-password', async (req, res) => {
     }
 
     const user = users[0];
-    const resetToken = crypto.randomBytes(32).toString('hex');
-    const tokenHash = hashVerificationToken(resetToken);
-
-    await sql.begin(async (transaction) => {
-      await transaction`
-        delete from password_reset_tokens
-        where user_id = ${user.id};
-      `;
-
-      await transaction`
-        insert into password_reset_tokens (user_id, token_hash, expires_at)
-        values (${user.id}, ${tokenHash}, now() + interval '30 minutes');
-      `;
-    });
-
-    const resetUrl = `${normalizedAppUrl}/#/reset-password?token=${resetToken}`;
-    await sendPasswordResetEmail({
-      to: user.email,
-      name: user.full_name,
-      resetUrl,
-    });
+    await issuePasswordResetForUser(user);
 
     return res.json({ message: 'Si un compte existe avec cet email, un message de reinitialisation a ete envoye.' });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: error instanceof Error ? error.message : 'Impossible d envoyer l email de reinitialisation.' });
+    return sendApiError(res, {
+      status: 500,
+      code: 'FORGOT_PASSWORD_FAILED',
+      title: 'Réinitialisation indisponible',
+      message: 'Le lien de réinitialisation ne peut pas être envoyé pour le moment. Réessayez dans quelques instants.',
+    });
   }
 });
 
@@ -2571,7 +2854,12 @@ app.post('/api/auth/reset-password', async (req, res) => {
     const password = typeof req.body.password === 'string' ? req.body.password : '';
 
     if (!token || password.length < 6) {
-      return res.status(400).json({ message: 'Token invalide ou mot de passe trop court.' });
+      return sendApiError(res, {
+        status: 400,
+        code: 'RESET_PASSWORD_INVALID_INPUT',
+        title: 'Réinitialisation impossible',
+        message: 'Le lien de réinitialisation ou le nouveau mot de passe n est pas valide.',
+      });
     }
 
     const tokenHash = hashVerificationToken(token);
@@ -2615,13 +2903,23 @@ app.post('/api/auth/reset-password', async (req, res) => {
     });
 
     if (!updatedUser) {
-      return res.status(400).json({ message: 'Le lien de reinitialisation est invalide ou a expire.' });
+      return sendApiError(res, {
+        status: 400,
+        code: 'RESET_PASSWORD_TOKEN_INVALID',
+        title: 'Lien expiré ou invalide',
+        message: 'Le lien de réinitialisation n est plus valide. Demandez un nouveau lien pour continuer.',
+      });
     }
 
     return res.json({ message: 'Votre mot de passe a ete reinitialise avec succes.' });
   } catch (error) {
     console.error(error);
-    return res.status(500).json({ message: 'Impossible de reinitialiser le mot de passe.' });
+    return sendApiError(res, {
+      status: 500,
+      code: 'RESET_PASSWORD_FAILED',
+      title: 'Réinitialisation indisponible',
+      message: 'Le mot de passe ne peut pas être réinitialisé pour le moment. Réessayez dans quelques instants.',
+    });
   }
 });
 

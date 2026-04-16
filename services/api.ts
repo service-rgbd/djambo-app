@@ -735,9 +735,29 @@ const apiRequest = async <T>(path: string, init?: RequestInit): Promise<T> => {
 
     const message = await response.text();
     try {
-      const parsed = JSON.parse(message) as { message?: string };
-      throw new Error(parsed.message || 'API request failed');
-    } catch {
+      const parsed = JSON.parse(message) as {
+        message?: string;
+        error?: {
+          message?: string;
+          title?: string;
+          code?: string;
+          retryAfterSeconds?: number;
+        };
+      };
+      const error = new Error(parsed.error?.message || parsed.message || 'API request failed') as Error & {
+        code?: string;
+        title?: string;
+        retryAfterSeconds?: number;
+      };
+      error.code = parsed.error?.code;
+      error.title = parsed.error?.title;
+      error.retryAfterSeconds = parsed.error?.retryAfterSeconds;
+      throw error;
+    } catch (error) {
+      if (error instanceof Error && error.message !== message) {
+        throw error;
+      }
+
       throw new Error(message || 'API request failed');
     }
   }
