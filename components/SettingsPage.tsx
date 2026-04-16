@@ -20,8 +20,15 @@ import { useAuth } from '../contexts/AuthContext';
 import { UserRole } from '../types';
 import { api, OwnerParkingSummary, PrivateAppSettings, PrivateSettingMediaScope } from '../services/api';
 import { ResolvedCurrentLocation, resolveCurrentLocation } from '../services/location';
+import { BrowserPushState, clearPushPromptDismissal, disablePushNotifications, enablePushNotifications, getBrowserPushState, syncExistingPushSubscription } from '../services/pushNotifications';
 
 const MAX_MEDIA_UPLOAD_SIZE_BYTES = 10 * 1024 * 1024;
+
+const defaultBrowserPushState: BrowserPushState = {
+  supported: false,
+  permission: 'unsupported',
+  subscribed: false,
+};
 
 const defaultSettings = (): PrivateAppSettings => {
   const origin = window.location.origin;
@@ -158,6 +165,9 @@ export const SettingsPage: React.FC = () => {
   const [detectingParkingId, setDetectingParkingId] = useState('');
   const [savingParkingId, setSavingParkingId] = useState('');
   const [locationDraft, setLocationDraft] = useState<(ResolvedCurrentLocation & { parkingId: string }) | null>(null);
+  const [browserPushState, setBrowserPushState] = useState<BrowserPushState>(defaultBrowserPushState);
+  const [pushBusy, setPushBusy] = useState(false);
+  const [pushError, setPushError] = useState('');
 
   const isParcAuto = user?.role === UserRole.PARC_AUTO;
 
@@ -203,6 +213,34 @@ export const SettingsPage: React.FC = () => {
       isMounted = false;
     };
   }, [isParcAuto]);
+
+  useEffect(() => {
+    let isMounted = true;
+
+    const syncPushState = async () => {
+      if (!user) {
+        if (isMounted) {
+          setBrowserPushState(defaultBrowserPushState);
+        }
+        return;
+      }
+
+      const currentState = await getBrowserPushState();
+      const subscribed = currentState.permission === 'granted'
+        ? (await syncExistingPushSubscription().catch(() => false)) || currentState.subscribed
+        : currentState.subscribed;
+
+      if (isMounted) {
+        setBrowserPushState({ ...currentState, subscribed });
+      }
+    };
+
+    void syncPushState();
+
+    return () => {
+      isMounted = false;
+    };
+  }, [user]);
 
   const handleChange = <K extends keyof PrivateAppSettings>(key: K, value: PrivateAppSettings[K]) => {
     setSettings((prev) => ({ ...prev, [key]: value }));
@@ -308,6 +346,52 @@ export const SettingsPage: React.FC = () => {
       setSavingParkingId('');
     }
   };
+
+  const refreshPushState = async () => {
+    const currentState = await getBrowserPushState();
+    const subscribed = currentState.permission === 'granted'
+      ? (await syncExistingPushSubscription().catch(() => false)) || currentState.subscribed
+      : currentState.subscribed;
+
+    setBrowserPushState({ ...currentState, subscribed });
+  };
+
+  const handleEnableDevicePush = async () => {
+    try {
+      setPushBusy(true);
+      setPushError('');
+      await enablePushNotifications();
+      if (user) {
+        clearPushPromptDismissal(user.id);
+      }
+      await refreshPushState();
+    } catch (error) {
+      setPushError(error instanceof Error ? error.message : 'Activation des notifications push impossible.');
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const handleDisableDevicePush = async () => {
+    try {
+      setPushBusy(true);
+      setPushError('');
+      await disablePushNotifications();
+      await refreshPushState();
+    } catch (error) {
+      setPushError(error instanceof Error ? error.message : 'Desactivation des notifications push impossible.');
+    } finally {
+      setPushBusy(false);
+    }
+  };
+
+  const pushPermissionLabel = browserPushState.permission === 'granted'
+    ? 'Autorisees'
+    : browserPushState.permission === 'denied'
+      ? 'Bloquees'
+      : browserPushState.permission === 'default'
+        ? 'En attente'
+        : 'Non supportees';
 
   return (
     <div className="space-y-6">
@@ -587,12 +671,49 @@ export const SettingsPage: React.FC = () => {
         title="Notifications et supervision"
         description="Ce qui doit etre remonte au bon moment dans le header et le suivi utilisateur."
       >
-        <div className="grid gap-4 xl:grid-cols-[1fr_1fr_0.9fr]">
+        <div className="grid gap-4 xl:grid-cols-[1fr_1fr_1fr_1.2fr]">
           <ToggleCard title="Alertes email" description="Demandes, contrats et activite." checked={settings.notificationsEmail} onChange={(checked) => handleChange('notificationsEmail', checked)} />
           <ToggleCard title="Alertes SMS" description="Pour les validations urgentes." checked={settings.notificationsSms} onChange={(checked) => handleChange('notificationsSms', checked)} />
           <div className="border border-slate-200 bg-slate-50 px-4 py-4">
             <div className="inline-flex items-center gap-2 text-sm font-bold text-slate-900"><ShieldCheck size={16} /> Cohesion</div>
             <p className="mt-2 text-sm text-slate-500">Les options activees ici servent de reference pour l interface privee, les contrats et la vitrine publique.</p>
+          </div>
+          <div className="border border-slate-200 bg-slate-50 px-4 py-4">
+            <div className="inline-flex items-center gap-2 text-sm font-bold text-slate-900"><Bell size={16} /> Presence push sur cet appareil</div>
+            <div className="mt-3 space-y-2 text-sm text-slate-600">
+              <p><span className="font-semibold text-slate-900">Support navigateur:</span> {browserPushState.supported ? 'oui' : 'non'}</p>
+              <p><span className="font-semibold text-slate-900">Autorisation:</span> {pushPermissionLabel}</p>
+              <p><span className="font-semibold text-slate-900">Abonnement actif:</span> {browserPushState.subscribed ? 'oui' : 'non'}</p>
+            </div>
+            <div className="mt-4 flex flex-col gap-2">
+              {browserPushState.permission === 'granted' && browserPushState.subscribed ? (
+                <button
+                  type="button"
+                  onClick={() => void handleDisableDevicePush()}
+                  disabled={pushBusy}
+                  className="inline-flex items-center justify-center gap-2 border border-slate-200 bg-white px-4 py-3 text-sm font-semibold text-slate-700 transition-colors hover:bg-slate-100 disabled:cursor-not-allowed disabled:opacity-60"
+                >
+                  {pushBusy ? <Loader2 size={16} className="animate-spin" /> : <Bell size={16} />}
+                  Desactiver les notifications push
+                </button>
+              ) : (
+                <button
+                  type="button"
+                  onClick={() => void handleEnableDevicePush()}
+                  disabled={pushBusy || !browserPushState.supported}
+                  className="inline-flex items-center justify-center gap-2 bg-slate-950 px-4 py-3 text-sm font-bold text-white transition-colors hover:bg-slate-800 disabled:cursor-not-allowed disabled:bg-slate-300"
+                >
+                  {pushBusy ? <Loader2 size={16} className="animate-spin" /> : <Bell size={16} />}
+                  Activer les notifications push
+                </button>
+              )}
+            </div>
+            {browserPushState.permission === 'denied' && (
+              <p className="mt-3 text-sm text-amber-700">Le navigateur bloque actuellement les notifications. Il faut les reautoriser dans les reglages du site.</p>
+            )}
+            {pushError && (
+              <p className="mt-3 text-sm text-rose-600">{pushError}</p>
+            )}
           </div>
         </div>
       </SettingSection>

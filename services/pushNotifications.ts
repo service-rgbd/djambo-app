@@ -6,6 +6,8 @@ export type BrowserPushState = {
   subscribed: boolean;
 };
 
+const pushPromptDismissVersion = 'v2';
+
 const isBrowserPushSupported = () => typeof window !== 'undefined'
   && 'Notification' in window
   && 'serviceWorker' in navigator
@@ -38,6 +40,24 @@ const getServiceWorkerRegistration = async () => {
   }
 
   return navigator.serviceWorker.ready;
+};
+
+export const getPushPromptDismissKey = (userId: string) => `djambo_push_prompt_dismissed:${pushPromptDismissVersion}:${userId}`;
+
+export const clearPushPromptDismissal = (userId: string) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.removeItem(getPushPromptDismissKey(userId));
+};
+
+export const dismissPushPromptForUser = (userId: string) => {
+  if (typeof window === 'undefined') {
+    return;
+  }
+
+  window.localStorage.setItem(getPushPromptDismissKey(userId), '1');
 };
 
 export const getBrowserPushState = async (): Promise<BrowserPushState> => {

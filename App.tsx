@@ -7,7 +7,7 @@ import {
 import { AuthProvider, useAuth } from './contexts/AuthContext';
 import { AIAssistant } from './components/AIAssistant';
 import { BrandLogo } from './components/BrandLogo';
-import { enablePushNotifications, disablePushNotifications, getBrowserPushState, syncExistingPushSubscription } from './services/pushNotifications';
+import { clearPushPromptDismissal, dismissPushPromptForUser, enablePushNotifications, disablePushNotifications, getBrowserPushState, getPushPromptDismissKey, syncExistingPushSubscription } from './services/pushNotifications';
 import { LandingPage } from './components/LandingPage';
 import { LoginPage } from './components/auth/LoginPage';
 import { RegisterPage } from './components/auth/RegisterPage';
@@ -152,7 +152,7 @@ const Header = ({ toggleSidebar }: { toggleSidebar: () => void }) => {
   const [pushBusy, setPushBusy] = useState(false);
   const [showPushPrompt, setShowPushPrompt] = useState(false);
 
-  const pushPromptDismissKey = user ? `djambo_push_prompt_dismissed:${user.id}` : null;
+  const pushPromptDismissKey = user ? getPushPromptDismissKey(user.id) : null;
 
   const routeMeta = React.useMemo(() => {
     if (location.pathname.includes('/app/contracts')) {
@@ -242,8 +242,8 @@ const Header = ({ toggleSidebar }: { toggleSidebar: () => void }) => {
       setPushEnabled(refreshedState.subscribed);
       setShowPushPrompt(false);
 
-      if (pushPromptDismissKey) {
-        window.localStorage.removeItem(pushPromptDismissKey);
+      if (user) {
+        clearPushPromptDismissal(user.id);
       }
     } catch (error) {
       window.alert(error instanceof Error ? error.message : 'Impossible de mettre a jour les notifications push.');
@@ -253,8 +253,8 @@ const Header = ({ toggleSidebar }: { toggleSidebar: () => void }) => {
   };
 
   const dismissPushPrompt = () => {
-    if (pushPromptDismissKey) {
-      window.localStorage.setItem(pushPromptDismissKey, '1');
+    if (user) {
+      dismissPushPromptForUser(user.id);
     }
     setShowPushPrompt(false);
   };
